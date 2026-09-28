@@ -1,0 +1,122 @@
+---
+- name: Run the final ticketing test through Ansible
+  hosts: load_executor
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    test_scenario: queue
+    test_action: run
+    test_timeout_seconds: 10800
+    runner_root: "{{ automation_root | default(playbook_dir + '/..') }}"
+    runner_config: "{{ test_config | default(runner_root + '/config.env') }}"
+    controller_results: "{{ playbook_dir }}/../collected"
+  tasks:
+    - name: Validate one executor and the selected final test
+      ansible.builtin.assert:
+        that:
+          - not ansible_check_mode
+          - groups['load_executor'] | length == 1
+          - test_scenario in ['queue', 'load', 'concurrency', 'e2e', 'smoke']
+          - test_action in ['check', 'run']
+          - test_timeout_seconds | int > 60
+        fail_msg: "Select one executor. For a read-only preflight use -e test_action=check, not --check."
+
+    - name: Check the runner and configuration on the executor
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ runner_root }}/run.sh"
+        - "{{ runner_config }}"
+      register: required_files
+
+    - name: Require the configured package before starting requests
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+        fail_msg: "Missing file on executor: {{ item.item }}"
+      loop: "{{ required_files.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Create the results parent
+      ansible.builtin.file:
+        path: "{{ runner_root }}/results"
+        state: directory
+        mode: '0700'
+
+    - name: Allocate one unique result directory for this Ansible test
+      ansible.builtin.tempfile:
+        state: directory
+        path: "{{ runner_root }}/results"
+        prefix: "ansible-{{ test_scenario }}-"
+      register: test_directory
+
+    - name: Show the selected test and result location
+      ansible.builtin.debug:
+        msg: "{{ test_action }} {{ test_scenario }} on {{ inventory_hostname }}; RESULT_DIR={{ test_directory.path }}"
+
+    - name: Execute preflight, k6 and its live guard on the selected host
+      ansible.builtin.command:
+        argv: "{{ ['timeout', '--signal=INT', '--kill-after=45s', (test_timeout_seconds | string), 'bash', runner_root + '/run.sh'] + (['check', test_scenario] if test_action == 'check' else [test_scenario]) }}"
+        chdir: "{{ runner_root }}"
+      environment:
+        CONFIG_FILE: "{{ runner_config }}"
+        RUN_OUTPUT_DIR: "{{ test_directory.path }}"
+      async: "{{ (test_timeout_seconds | int) + 60 }}"
+      poll: 5
+      register: execution
+      failed_when: false
+      changed_when: test_action == 'run'
+
+    - name: Save Ansible execution status including failed or blocked runs
+      ansible.builtin.copy:
+        dest: "{{ test_directory.path }}/ansible-execution.json"
+        mode: '0600'
+        content: "{{ {'scenario': test_scenario, 'action': test_action, 'executor': inventory_hostname, 'rc': execution.rc | default(-1), 'stdout': execution.stdout | default(''), 'stderr': execution.stderr | default(''), 'message': execution.msg | default('')} | to_nice_json }}"
+
+    - name: Check whether the runner could produce a report
+      ansible.builtin.stat:
+        path: "{{ test_directory.path }}/report.md"
+      register: report_file
+
+    - name: Preserve an early failure as a report
+      ansible.builtin.copy:
+        dest: "{{ test_directory.path }}/report.md"
+        mode: '0600'
+        content: |
+          # 최종 시험 실행 결과
+
+          시험 실행에 실패하거나 초기 단계에서 차단되었습니다.
+          ansible-execution.json의 종료코드와 오류를 확인하세요.
+          측정 결과를 성공이나 0으로 대체하지 않습니다.
+      when: not report_file.stat.exists
+
+    - name: Archive this test result only
+      ansible.builtin.command:
+        argv:
+          - tar
+          - -czf
+          - "{{ test_directory.path }}.tar.gz"
+          - -C
+          - "{{ test_directory.path | dirname }}"
+          - "{{ test_directory.path | basename }}"
+      changed_when: false
+
+    - name: Fetch the archive to the Ansible controller
+      ansible.builtin.fetch:
+        src: "{{ test_directory.path }}.tar.gz"
+        dest: "{{ controller_results }}/{{ test_directory.path | basename }}.tar.gz"
+        flat: true
+
+    - name: Display report and collected evidence paths
+      ansible.builtin.debug:
+        msg:
+          - "Report on executor: {{ test_directory.path }}/report.md"
+          - "Archive on controller: {{ controller_results }}/{{ test_directory.path | basename }}.tar.gz"
+
+    - name: Return failure when the test did not finish successfully
+      ansible.builtin.assert:
+        that:
+          - execution.rc | default(-1) | int == 0
+        fail_msg: "Test failed or was blocked/stopped. The report and evidence were preserved."

@@ -1,0 +1,117 @@
+---
+- name: Check the Controller kubeconfig
+  ansible.builtin.stat:
+    path: "{{ controller_kubeconfig }}"
+  register: controller_kubeconfig_stat
+
+- name: Require bootstrap.yml to have completed
+  ansible.builtin.assert:
+    that:
+      - controller_kubeconfig_stat.stat.exists
+      - controller_kubeconfig_stat.stat.mode == '0600'
+    fail_msg: >-
+      {{ controller_kubeconfig }} is missing or has unsafe permissions.
+      Run data_playbooks/bootstrap.yml first.
+
+- name: Check Kubernetes API access
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - "--kubeconfig={{ controller_kubeconfig }}"
+      - get
+      - --raw=/readyz
+  register: kubernetes_readyz
+  changed_when: false
+
+- name: Require the Kubernetes API to be ready
+  ansible.builtin.assert:
+    that:
+      - kubernetes_readyz.stdout | trim == 'ok'
+    fail_msg: "Kubernetes API /readyz did not return ok."
+
+- name: Wait for every registered node to be Ready
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - "--kubeconfig={{ controller_kubeconfig }}"
+      - wait
+      - --for=condition=Ready
+      - node
+      - --all
+      - --timeout=120s
+  changed_when: false
+
+- name: Read schedulable Worker nodes
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ controller_kubeconfig }}"
+    api_version: v1
+    kind: Node
+    label_selectors:
+      - "!node-role.kubernetes.io/control-plane"
+      - "!node-role.kubernetes.io/master"
+  register: worker_node_info
+
+- name: Require three Worker nodes for the HA data tier
+  ansible.builtin.assert:
+    that:
+      - (worker_node_info.resources | length) >= (ha_replica_count | int)
+      - (redis_replicas | int) == (ha_replica_count | int)
+      - (postgresql_instances | int) == (ha_replica_count | int)
+      - (kafka_replicas | int) == (ha_replica_count | int)
+    fail_msg: >-
+      Redis, PostgreSQL, and Kafka HA require at least three Ready Worker nodes and
+      all three replica counts must remain 3. Current non-Control-Plane node count:
+      {{ worker_node_info.resources | length }}.
+
+- name: Create Data and Monitoring namespaces
+  kubernetes.core.k8s:
+    kubeconfig: "{{ controller_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ item }}"
+        labels:
+          app.kubernetes.io/part-of: ticketing-platform
+  loop:
+    - "{{ data_namespace }}"
+    - "{{ monitoring_namespace }}"
+
+- name: Select the StorageClasses required by this playbook
+  ansible.builtin.set_fact:
+    active_storage_class_names: >-
+      {{ required_storage_class_names | default(all_storage_class_names) | unique | list }}
+
+- name: Read the required StorageClasses
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ controller_kubeconfig }}"
+    api_version: storage.k8s.io/v1
+    kind: StorageClass
+    name: "{{ item }}"
+  loop: "{{ active_storage_class_names }}"
+  register: storage_class_checks
+  loop_control:
+    label: "{{ item }}"
+
+- name: Require Static Local StorageClasses with delayed binding
+  ansible.builtin.assert:
+    that:
+      - item.resources | length == 1
+      - item.resources[0].provisioner == 'kubernetes.io/no-provisioner'
+      - item.resources[0].volumeBindingMode | default('Immediate') == 'WaitForFirstConsumer'
+    fail_msg: >-
+      StorageClass '{{ item.item }}' is missing, is not a Static Local StorageClass,
+      or does not use WaitForFirstConsumer. The Storage teammate must finish the
+      StorageClass and Local PV preparation before deploying this service.
+  loop: "{{ storage_class_checks.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Create the local secret persistence directory
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/.secrets"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'

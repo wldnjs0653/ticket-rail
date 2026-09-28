@@ -1,0 +1,8 @@
+---
+redis_username: "ticketapp"
+redis_password: "{{ vault_redis_password }}"
+
+redis_allowed_sources:
+  - "10.1.93.66"
+  - "10.1.93.67"
+  - "10.1.93.68"

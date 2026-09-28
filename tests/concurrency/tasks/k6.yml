@@ -1,0 +1,82 @@
+---
+- name: Prevent inherited k6 config file from changing the run
+  ansible.builtin.copy:
+    dest: "{{ run_dir }}/k6-config.json"
+    content: '{}'
+    mode: '0600'
+- name: Set explicit k6 execution environment
+  ansible.builtin.set_fact:
+    k6_environment:
+      BASE_URL: "{{ base_url }}"
+      EVENT_ID: "{{ event_id | string }}"
+      SEAT_ID: "{{ seat_id | string }}"
+      USER_IDS: "{{ user_ids | join(',') }}"
+      RUN_ID: "{{ run_id }}"
+      START_DELAY_MS: "{{ start_delay_ms | string }}"
+      QUEUE_MAX_WAIT_SECONDS: "{{ queue_max_wait_seconds | string }}"
+      QUEUE_POLL_SECONDS: "{{ queue_poll_seconds | string }}"
+      REQUEST_TIMEOUT_SECONDS: "{{ request_timeout_seconds | string }}"
+      K6_INSECURE_SKIP_TLS_VERIFY: 'false'
+      K6_PROMETHEUS_RW_SERVER_URL: "{{ prometheus_remote_write_url }}"
+      K6_PROMETHEUS_RW_TREND_STATS: p(50),p(95),p(99),max
+    k6_outputs: "{{ ['--out', 'experimental-prometheus-rw'] if prometheus_remote_write_url | length > 0 else [] }}"
+- name: Execute k6 directly with Ansible command
+  ansible.builtin.command:
+    argv: "{{ [k6_binary, 'run', '--config', run_dir + '/k6-config.json', '--insecure-skip-tls-verify=false', '--max-redirects', '0', '--tag', 'run_id=' + run_id, '--log-format', 'raw', '--log-output', 'file=' + run_dir + '/events.log', '--out', 'json=' + run_dir + '/points.json'] + k6_outputs + [run_dir + '/source/k6/seat-concurrency.js'] }}"
+    chdir: "{{ run_dir }}"
+  environment: "{{ k6_environment | combine({'SSL_CERT_FILE': tls_ca_file} if tls_ca_file | length > 0 else {}) }}"
+  async: 480
+  poll: 5
+  register: k6_run
+  changed_when: true
+  failed_when: false
+- name: Preserve raw execution result
+  ansible.builtin.copy:
+    dest: "{{ run_dir }}/k6-execution.json"
+    content: "{{ k6_run | to_nice_json }}"
+    mode: '0600'
+- name: Preserve human-readable console output
+  ansible.builtin.copy:
+    dest: "{{ run_dir }}/console.log"
+    content: "{{ k6_run.stdout | default('') }}\n{{ k6_run.stderr | default('') }}\n"
+    mode: '0600'
+- name: Record actual exit status
+  ansible.builtin.set_fact:
+    k6_exit_code: "{{ k6_run.rc | default(-1) }}"
+- name: Read structured per-request log
+  ansible.builtin.slurp:
+    src: "{{ run_dir }}/events.log"
+  register: events_file
+- name: Decode evidence lines without an external parser
+  ansible.builtin.set_fact:
+    event_records: "{{ (events_file.content | b64decode).splitlines() | select('match', '^EVIDENCE ') | map('regex_replace', '^EVIDENCE ', '') | map('from_json') | list }}"
+- name: Keep only this run's requests
+  ansible.builtin.set_fact:
+    hold_records: "{{ event_records | selectattr('run_id', 'equalto', run_id) | selectattr('kind', 'equalto', 'hold') | list }}"
+    booking_records: "{{ event_records | selectattr('run_id', 'equalto', run_id) | selectattr('kind', 'equalto', 'booking') | list }}"
+- name: Compute request-level correctness
+  ansible.builtin.set_fact:
+    api_ok: >-
+      {{ k6_exit_code | int == 0 and hold_records | length == 5
+         and (hold_records | map(attribute='user_id') | sort | list) == (user_ids | map('string') | sort | list)
+         and hold_records | selectattr('seat_id', 'equalto', seat_id | string) | list | length == 5
+         and hold_records | selectattr('status', 'equalto', 200) | list | length == 1
+         and hold_records | selectattr('status', 'equalto', 409) | list | length == 4
+         and booking_records | length == 1 and booking_records[0].status == 201
+         and booking_records[0].booking_id is match('^[1-9][0-9]*$')
+         and booking_records[0].user_id == (hold_records | selectattr('status', 'equalto', 200) | first).user_id }}
+- name: Calculate overlap only with all five distinct records
+  when: hold_records | length == 5 and hold_records | map(attribute='user_id') | unique | list | length == 5
+  block:
+    - name: Compute common client interval and departure spread
+      ansible.builtin.set_fact:
+        overlap_ms: "{{ [0, (hold_records | map(attribute='end_ms') | min) - (hold_records | map(attribute='start_ms') | max)] | max }}"
+        start_spread_ms: "{{ (hold_records | map(attribute='start_ms') | max) - (hold_records | map(attribute='start_ms') | min) }}"
+    - name: Check common target and on-time start
+      ansible.builtin.set_fact:
+        timing_ok: "{{ overlap_ms | int > 0 and hold_records | map(attribute='target_ms') | unique | list | length == 1 and (hold_records | map(attribute='lateness_ms') | min) >= 0 and (hold_records | map(attribute='lateness_ms') | max) <= max_start_lateness_ms | int }}"
+- name: Save request timing evidence
+  ansible.builtin.template:
+    src: requests.csv.j2
+    dest: "{{ run_dir }}/requests.csv"
+    mode: '0600'

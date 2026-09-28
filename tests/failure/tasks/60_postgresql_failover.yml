@@ -1,0 +1,186 @@
+---
+- name: Find the current PostgreSQL Primary Pod
+  ansible.builtin.command:
+    argv:
+      - "{{ kubectl_bin }}"
+      - get
+      - pod
+      - -n
+      - "{{ data_namespace }}"
+      - -l
+      - "cnpg.io/cluster={{ postgresql_cluster }},cnpg.io/instanceRole=primary"
+      - -o
+      - "jsonpath={.items[0].metadata.name}"
+  register: postgresql_primary_before
+  changed_when: false
+  failed_when: postgresql_primary_before.stdout | trim == ""
+
+- name: Create a replicated PostgreSQL marker
+  ansible.builtin.command:
+    argv:
+      - "{{ kubectl_bin }}"
+      - exec
+      - -n
+      - "{{ data_namespace }}"
+      - "{{ postgresql_primary_before.stdout | trim }}"
+      - -c
+      - postgres
+      - --
+      - psql
+      - -U
+      - postgres
+      - -d
+      - ticketing
+      - -v
+      - ON_ERROR_STOP=1
+      - -c
+      - >-
+        CREATE SCHEMA IF NOT EXISTS failure_test;
+        CREATE TABLE IF NOT EXISTS failure_test.marker
+        (run_id text PRIMARY KEY, created_at timestamptz NOT NULL DEFAULT now());
+        INSERT INTO failure_test.marker(run_id)
+        VALUES ('{{ failure_test_run_id }}')
+        ON CONFLICT (run_id) DO UPDATE SET created_at=now();
+  register: postgresql_marker_write
+  changed_when: true
+
+- name: Allow the PostgreSQL marker to replicate
+  ansible.builtin.wait_for:
+    timeout: 3
+  changed_when: false
+
+- name: Record the PostgreSQL fault start time
+  ansible.builtin.command:
+    argv: [date, "+%s%3N"]
+  register: postgresql_fault_start_ms
+  changed_when: false
+
+- name: Delete the PostgreSQL Primary Pod
+  ansible.builtin.command:
+    argv:
+      - "{{ kubectl_bin }}"
+      - delete
+      - pod
+      - "{{ postgresql_primary_before.stdout | trim }}"
+      - -n
+      - "{{ data_namespace }}"
+      - --wait=false
+  changed_when: true
+
+- name: Wait for a different PostgreSQL Primary
+  ansible.builtin.shell: |
+    set -euo pipefail
+    deadline=$((SECONDS + {{ data_failover_timeout_seconds }}))
+    while (( SECONDS < deadline )); do
+      primary=$("{{ kubectl_bin }}" get pod -n "{{ data_namespace }}"         -l "cnpg.io/cluster={{ postgresql_cluster }},cnpg.io/instanceRole=primary"         -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+      ready=""
+      if [[ -n "$primary" ]]; then
+        ready=$("{{ kubectl_bin }}" get pod -n "{{ data_namespace }}" "$primary"           -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
+      fi
+      if [[ -n "$primary" && "$primary" != "{{ postgresql_primary_before.stdout | trim }}" && "$ready" == "True" ]]; then
+        printf '%s\n' "$primary"
+        exit 0
+      fi
+      sleep 1
+    done
+    exit 1
+  args:
+    executable: /bin/bash
+  register: postgresql_primary_after
+  changed_when: false
+
+- name: Record the PostgreSQL failover time
+  ansible.builtin.command:
+    argv: [date, "+%s%3N"]
+  register: postgresql_failover_end_ms
+  changed_when: false
+
+- name: Verify the PostgreSQL marker on the new Primary
+  ansible.builtin.command:
+    argv:
+      - "{{ kubectl_bin }}"
+      - exec
+      - -n
+      - "{{ data_namespace }}"
+      - "{{ postgresql_primary_after.stdout | trim }}"
+      - -c
+      - postgres
+      - --
+      - psql
+      - -U
+      - postgres
+      - -d
+      - ticketing
+      - -At
+      - -v
+      - ON_ERROR_STOP=1
+      - -c
+      - "SELECT run_id FROM failure_test.marker WHERE run_id='{{ failure_test_run_id }}';"
+  register: postgresql_marker_read
+  changed_when: false
+  failed_when: postgresql_marker_read.stdout | trim != failure_test_run_id
+
+- name: Wait for all PostgreSQL instances after failover
+  ansible.builtin.shell: |
+    set -euo pipefail
+    deadline=$((SECONDS + {{ data_failover_timeout_seconds }}))
+    while (( SECONDS < deadline )); do
+      ready=$("{{ kubectl_bin }}" get cluster "{{ postgresql_cluster }}" -n "{{ data_namespace }}"         -o jsonpath='{.status.readyInstances}' 2>/dev/null || true)
+      [[ "$ready" == "3" ]] && exit 0
+      sleep 2
+    done
+    exit 1
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Record the final PostgreSQL recovery time
+  ansible.builtin.command:
+    argv: [date, "+%s%3N"]
+  register: postgresql_final_ms
+  changed_when: false
+
+- name: Remove the PostgreSQL failure-test schema
+  ansible.builtin.command:
+    argv:
+      - "{{ kubectl_bin }}"
+      - exec
+      - -n
+      - "{{ data_namespace }}"
+      - "{{ postgresql_primary_after.stdout | trim }}"
+      - -c
+      - postgres
+      - --
+      - psql
+      - -U
+      - postgres
+      - -d
+      - ticketing
+      - -v
+      - ON_ERROR_STOP=1
+      - -c
+      - DROP SCHEMA IF EXISTS failure_test CASCADE;
+  changed_when: true
+  failed_when: false
+
+- name: Record the PostgreSQL failover result
+  ansible.builtin.set_fact:
+    failure_results: >-
+      {{
+        failure_results | combine({
+          'postgresql_primary_failover': {
+            'status': 'PASS',
+            'primary_before': postgresql_primary_before.stdout | trim,
+            'primary_after': postgresql_primary_after.stdout | trim,
+            'fault_at_epoch_ms': postgresql_fault_start_ms.stdout | int,
+            'failover_at_epoch_ms': postgresql_failover_end_ms.stdout | int,
+            'final_at_epoch_ms': postgresql_final_ms.stdout | int,
+            'failover_seconds':
+              (((postgresql_failover_end_ms.stdout | int) - (postgresql_fault_start_ms.stdout | int)) / 1000) | round(3),
+            'full_recovery_seconds':
+              (((postgresql_final_ms.stdout | int) - (postgresql_fault_start_ms.stdout | int)) / 1000) | round(3),
+            'marker_preserved': true
+          }
+        })
+      }}
+

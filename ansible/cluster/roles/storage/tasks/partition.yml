@@ -1,0 +1,196 @@
+---
+# ============================================================
+# 1. Data 파티션 배치 자동 계산
+#    storage_partitions의 capacity를 기준으로 계산
+# ============================================================
+
+- name: Initialize data partition layout
+  ansible.builtin.set_fact:
+    storage_partition_layout: []
+    storage_partition_cursor_mib: "{{ storage_partition_start_mib | int }}"
+  when:
+    - (storage_partition_count.stdout | int) == 0
+
+- name: Build data partition layout
+  ansible.builtin.set_fact:
+    storage_partition_layout: >-
+      {{
+        storage_partition_layout
+        +
+        [
+          item
+          |
+          combine({
+            'start_mib': (storage_partition_cursor_mib | int),
+            'end_mib':
+              (storage_partition_cursor_mib | int)
+              + (partition_size_mib | int)
+          })
+        ]
+      }}
+    storage_partition_cursor_mib: >-
+      {{
+        (storage_partition_cursor_mib | int)
+        + (partition_size_mib | int)
+      }}
+  vars:
+    partition_size_mib: >-
+      {{
+        (
+          item.capacity
+          | regex_replace('Gi$', '')
+          | int
+        )
+        * 1024
+      }}
+  loop: "{{ storage_partitions }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - (storage_partition_count.stdout | int) == 0
+
+
+# ============================================================
+# 2. 계산한 파티션이 실제 Data 디스크 안에 들어가는지 확인
+# ============================================================
+
+- name: Read actual data disk size
+  ansible.builtin.command:
+    argv:
+      - lsblk
+      - -bdno
+      - SIZE
+      - "{{ storage_device }}"
+  register: storage_actual_disk_size
+  changed_when: false
+  when:
+    - (storage_partition_count.stdout | int) == 0
+
+- name: Verify data partition layout fits on disk
+  ansible.builtin.assert:
+    that:
+      - (storage_partition_cursor_mib | int) <=
+        ((storage_actual_disk_size.stdout | int) // (1024 * 1024))
+    fail_msg: >-
+      중단: Data 파티션에 필요한 공간이
+      {{ storage_device }}의 실제 용량을 초과합니다.
+      required_end={{ storage_partition_cursor_mib }}MiB
+      disk_size={{
+        (storage_actual_disk_size.stdout | int) // (1024 * 1024)
+      }}MiB
+  when:
+    - (storage_partition_count.stdout | int) == 0
+
+
+# ============================================================
+# 3. 신규 Data 디스크에 GPT partition table 생성
+# ============================================================
+
+- name: Create GPT partition table
+  ansible.builtin.command:
+    argv:
+      - parted
+      - -s
+      - "{{ storage_device }}"
+      - mklabel
+      - gpt
+  when:
+    - (storage_partition_count.stdout | int) == 0
+
+
+# ============================================================
+# 4. Data 파티션 생성
+# ============================================================
+
+- name: Create data partitions
+  ansible.builtin.command:
+    argv:
+      - parted
+      - -s
+      - "{{ storage_device }}"
+      - unit
+      - MiB
+      - mkpart
+      - primary
+      - xfs
+      - "{{ item.start_mib }}MiB"
+      - "{{ item.end_mib }}MiB"
+  loop: "{{ storage_partition_layout }}"
+  loop_control:
+    label: >-
+      {{ item.name }}
+      {{ item.start_mib }}MiB-{{ item.end_mib }}MiB
+  when:
+    - (storage_partition_count.stdout | int) == 0
+
+
+# ============================================================
+# 5. Kernel에 partition table 변경 반영
+# ============================================================
+
+- name: Reload partition table
+  ansible.builtin.command:
+    argv:
+      - partprobe
+      - "{{ storage_device }}"
+  when:
+    - (storage_partition_count.stdout | int) == 0
+
+- name: Wait for partition devices
+  ansible.builtin.command:
+    cmd: udevadm settle
+  when:
+    - (storage_partition_count.stdout | int) == 0
+
+
+# ============================================================
+# 6. 생성 결과 검증
+# ============================================================
+
+- name: Count partitions after creation
+  ansible.builtin.shell: |
+    lsblk -ln -o TYPE "{{ storage_device }}" |
+    grep -c '^part$' || true
+  args:
+    executable: /bin/bash
+  register: storage_partition_count_after
+  changed_when: false
+  when:
+    - (storage_partition_count.stdout | int) == 0
+
+- name: Verify all data partitions were created
+  ansible.builtin.assert:
+    that:
+      - (storage_partition_count_after.stdout | int) ==
+        (storage_partitions | length)
+    fail_msg: >-
+      중단: Data 파티션 생성 결과가 예상과 다릅니다.
+      expected={{ storage_partitions | length }}
+      actual={{ storage_partition_count_after.stdout }}
+  when:
+    - (storage_partition_count.stdout | int) == 0
+
+- name: Check created data partition devices
+  ansible.builtin.stat:
+    path: "{{ storage_partition_devices[item.name] }}"
+  loop: "{{ storage_partitions }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: storage_created_partitions
+  when:
+    - (storage_partition_count.stdout | int) == 0
+
+- name: Verify created data partition devices
+  ansible.builtin.assert:
+    that:
+      - result.stat.exists
+      - result.stat.isblk | default(false)
+    fail_msg: >-
+      중단: 생성된 Data 파티션 장치를 찾을 수 없습니다.
+      device={{ storage_partition_devices[result.item.name] }}
+  loop: "{{ storage_created_partitions.results }}"
+  loop_control:
+    loop_var: result
+    label: "{{ result.item.name }}"
+  when:
+    - (storage_partition_count.stdout | int) == 0

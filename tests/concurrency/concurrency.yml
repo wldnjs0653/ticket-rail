@@ -1,0 +1,170 @@
+---
+- name: Same-seat concurrency test managed by Ansible
+  hosts: test_controller
+  gather_facts: false
+  vars_files:
+    - vars/concurrency.yml
+  tasks:
+    - name: Validate explicit inputs before any API changes
+      ansible.builtin.assert:
+        that:
+          - not ansible_check_mode
+          - base_url is match('^https://[^/?#\s]+$')
+          - event_id | string is match('^[1-9][0-9]*$')
+          - seat_id | string is match('^[1-9][0-9]*$')
+          - user_ids is sequence and user_ids is not string
+          - user_ids | length == 5
+          - user_ids | map('string') | unique | list | length == 5
+          - user_ids | map('string') | select('match', '^[1-9][0-9]*$') | list | length == 5
+          - start_delay_ms | int >= 1000 and start_delay_ms | int <= 10000
+          - max_start_lateness_ms | int >= 0
+          - queue_max_wait_seconds | int >= 1 and queue_max_wait_seconds | int <= 60
+          - queue_poll_seconds | int >= 1
+          - request_timeout_seconds | int >= 1 and request_timeout_seconds | int <= 10
+          - db_poll_attempts | int >= 1 and db_poll_attempts | int <= 60
+          - db_poll_seconds | int >= 1
+        fail_msg: vars/concurrency.yml에 HTTPS 주소, 빈 좌석 ID와 서로 다른 실제 사용자 ID 5개를 설정하세요. --check 실행은 지원하지 않습니다.
+
+    - name: Verify local tools
+      ansible.builtin.command:
+        argv: "{{ item }}"
+      loop:
+        - ['{{ k6_binary }}', 'version']
+        - ['{{ kubectl_binary }}', 'version', '--client=true']
+      changed_when: false
+      register: tool_versions
+
+    - name: Allocate unique result directory
+      ansible.builtin.file:
+        path: "{{ result_root }}"
+        state: directory
+        mode: '0700'
+    - name: Get UTC identifier
+      ansible.builtin.command:
+        argv: ['date', '-u', '+%Y%m%dT%H%M%SZ']
+      register: utc_start
+      changed_when: false
+    - name: Create isolated run directory
+      ansible.builtin.tempfile:
+        state: directory
+        path: "{{ result_root }}"
+        prefix: "{{ utc_start.stdout }}-concurrency-"
+      register: run_directory
+    - name: Initialize result
+      ansible.builtin.set_fact:
+        run_dir: "{{ run_directory.path }}"
+        run_id: "{{ run_directory.path | basename }}"
+        test_state: ERROR
+        error_message: ''
+        api_ok: false
+        timing_ok: false
+        db_ok: false
+        hold_records: []
+        booking_records: []
+        overlap_ms: null
+        start_spread_ms: null
+        db_attempts: []
+        db_snapshot: {}
+        k6_exit_code: null
+
+    - name: Preserve source used for this run
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/{{ item }}"
+        dest: "{{ run_dir }}/source/"
+        mode: preserve
+      loop: ['concurrency.yml', 'tasks', 'templates', 'k6', 'vars']
+
+    - name: Save resolved execution settings
+      ansible.builtin.copy:
+        dest: "{{ run_dir }}/settings.json"
+        mode: '0600'
+        content: "{{ {'run_id': run_id, 'base_url': base_url, 'event_id': event_id, 'seat_id': seat_id, 'user_ids': user_ids, 'start_delay_ms': start_delay_ms, 'max_start_lateness_ms': max_start_lateness_ms, 'queue_max_wait_seconds': queue_max_wait_seconds, 'queue_poll_seconds': queue_poll_seconds, 'request_timeout_seconds': request_timeout_seconds, 'db_poll_attempts': db_poll_attempts, 'db_poll_seconds': db_poll_seconds, 'database': postgres_database, 'postgres_cluster': postgres_cluster, 'data_namespace': data_namespace, 'postgres_user': postgres_user, 'postgres_container': postgres_container, 'available_seat_status': available_seat_status, 'confirmed_booking_status': confirmed_booking_status, 'booked_seat_status': booked_seat_status, 'approved_payment_status': approved_payment_status, 'tls_verify': true, 'tls_ca_file': tls_ca_file, 'prometheus_remote_write_url': prometheus_remote_write_url, 'tool_versions': tool_versions.results | map(attribute='stdout') | list} | to_nice_json }}"
+
+    - name: Prepare and execute test with evidence saved on failure
+      block:
+        - name: Resolve current PostgreSQL primary
+          ansible.builtin.include_tasks: tasks/primary.yml
+        - name: Store pre-test SQL
+          ansible.builtin.template:
+            src: precheck.sql.j2
+            dest: "{{ run_dir }}/precheck.sql"
+            mode: '0600'
+        - name: Read actual seat state before test
+          ansible.builtin.command:
+            argv: "{{ psql_argv }}"
+            stdin: "{{ lookup('file', run_dir + '/precheck.sql') }}"
+          register: precheck_query
+          changed_when: false
+          failed_when: false
+        - name: Preserve DB precheck output
+          ansible.builtin.copy:
+            dest: "{{ run_dir }}/db-before-raw.json"
+            content: "{{ precheck_query | to_nice_json }}"
+            mode: '0600'
+        - name: Require successful read-only query
+          ansible.builtin.assert:
+            that: precheck_query.rc == 0
+            fail_msg: DB 사전 조회에 실패했습니다. db-before-raw.json을 확인하세요.
+        - name: Decode DB baseline
+          ansible.builtin.set_fact:
+            before_db: "{{ precheck_query.stdout | from_json }}"
+        - name: Require fresh unbooked seat in requested event
+          ansible.builtin.assert:
+            that:
+              - before_db.seats | length == 1
+              - before_db.seats[0].event_id | string == event_id | string
+              - before_db.seats[0].status == available_seat_status
+              - before_db.seat_link_count | int == 0
+            fail_msg: 대상 좌석이 빈 좌석이 아닙니다. 다른 빈 좌석을 지정하세요. 기존 예약은 삭제하지 않습니다.
+        - name: Execute k6 and inspect request evidence
+          ansible.builtin.include_tasks: tasks/k6.yml
+        - name: Read DB after a single valid booking was returned
+          when: booking_records | length == 1 and booking_records[0].status == 201 and booking_records[0].booking_id is match('^[1-9][0-9]*$')
+          block:
+            - name: Record winning identity
+              ansible.builtin.set_fact:
+                winner_booking_id: "{{ booking_records[0].booking_id }}"
+                winner_user_id: "{{ booking_records[0].user_id }}"
+            - name: Store final DB verification query
+              ansible.builtin.template:
+                src: verify.sql.j2
+                dest: "{{ run_dir }}/verify.sql"
+                mode: '0600'
+            - name: Poll asynchronous payment completion with read-only SQL
+              ansible.builtin.include_tasks: tasks/db_poll.yml
+              loop: "{{ range(1, (db_poll_attempts | int) + 1) | list }}"
+              loop_control:
+                loop_var: db_attempt
+              when: not db_ok
+        - name: Classify API, client overlap and DB independently
+          ansible.builtin.set_fact:
+            test_state: "{{ 'FAIL' if not api_ok or not db_ok else ('PASS' if timing_ok else 'INCONCLUSIVE') }}"
+      rescue:
+        - name: Record automation error without claiming success
+          ansible.builtin.set_fact:
+            test_state: ERROR
+            error_message: "{{ ansible_failed_result.msg | default('실행 또는 증거 해석 오류') }}"
+      always:
+        - name: Save machine-readable outcome
+          ansible.builtin.copy:
+            dest: "{{ run_dir }}/result.json"
+            mode: '0600'
+            content: "{{ {'run_id': run_id, 'state': test_state, 'api_ok': api_ok, 'client_timing_ok': timing_ok, 'db_ok': db_ok, 'overlap_ms': overlap_ms, 'start_spread_ms': start_spread_ms, 'k6_exit_code': k6_exit_code, 'error': error_message, 'hold_records': hold_records, 'booking_records': booking_records, 'db': db_snapshot} | to_nice_json }}"
+        - name: Save every DB polling observation
+          ansible.builtin.copy:
+            dest: "{{ run_dir }}/db-history.json"
+            mode: '0600'
+            content: "{{ db_attempts | to_nice_json }}"
+        - name: Write report from preserved evidence
+          ansible.builtin.template:
+            src: report.md.j2
+            dest: "{{ run_dir }}/report.md"
+            mode: '0600'
+        - name: Show result location
+          ansible.builtin.debug:
+            msg: "{{ test_state }} — {{ run_dir }}/report.md"
+
+    - name: Require a complete concurrency result
+      ansible.builtin.assert:
+        that: test_state == 'PASS'
+        fail_msg: "{{ test_state }}: {{ run_dir }}/report.md와 원자료를 확인하세요. 자동 재실행·예약 삭제는 하지 않습니다."

@@ -1,0 +1,11 @@
+---
+- name: Run monitoring platform preflight
+  ansible.builtin.import_tasks: preflight.yml
+
+- name: Deploy backend ServiceMonitor
+  ansible.builtin.import_tasks: deploy.yml
+
+- name: Validate backend metrics collection
+  ansible.builtin.import_tasks: validate.yml
+  when: backend_monitoring_run_runtime_validation | bool
+

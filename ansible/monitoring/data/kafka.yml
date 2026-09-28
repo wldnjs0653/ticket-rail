@@ -1,0 +1,392 @@
+---
+- name: Deploy and verify Kafka with Strimzi KRaft from start to finish
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/main.yml
+  vars:
+    ansible_python_interpreter: "{{ controller_python }}"
+
+  pre_tasks:
+    - name: Run shared Kubernetes and storage checks
+      ansible.builtin.include_tasks: tasks/cluster_prerequisites.yml
+      vars:
+        required_storage_class_names:
+          - "{{ kafka_storage_class_name }}"
+
+  tasks:
+    - name: Add or refresh the official Strimzi Helm repository
+      ansible.builtin.command:
+        argv:
+          - "{{ helm_binary }}"
+          - repo
+          - add
+          - strimzi
+          - https://strimzi.io/charts/
+          - --force-update
+      register: strimzi_repo
+      changed_when: "'has been added' in strimzi_repo.stdout or 'has been updated' in strimzi_repo.stdout"
+
+    - name: Install the Strimzi Cluster Operator
+      kubernetes.core.helm:
+        binary_path: "{{ helm_binary }}"
+        kubeconfig: "{{ controller_kubeconfig }}"
+        release_name: strimzi-kafka-operator
+        chart_ref: strimzi/strimzi-kafka-operator
+        chart_version: "{{ strimzi_chart_version }}"
+        release_namespace: strimzi-system
+        create_namespace: true
+        release_state: present
+        update_repo_cache: true
+        reset_values: true
+        atomic: true
+        wait: true
+        timeout: 10m0s
+        history_max: 5
+        release_values:
+          replicas: 1
+          watchNamespaces:
+            - "{{ data_namespace }}"
+          watchAnyNamespace: false
+          resources:
+            requests:
+              cpu: 200m
+              memory: 384Mi
+            limits:
+              cpu: 500m
+              memory: 768Mi
+
+    - name: Wait for the Strimzi CustomResourceDefinitions
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - wait
+          - --for=condition=Established
+          - "customresourcedefinition/{{ item }}"
+          - --timeout=180s
+      loop:
+        - kafkas.kafka.strimzi.io
+        - kafkanodepools.kafka.strimzi.io
+        - kafkatopics.kafka.strimzi.io
+      changed_when: false
+
+    - name: Create the Kafka JMX exporter configuration
+      kubernetes.core.k8s:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        state: present
+        apply: true
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: kafka-metrics
+            namespace: "{{ data_namespace }}"
+            labels:
+              app.kubernetes.io/part-of: ticketing-platform
+          data:
+            kafka-metrics-config.yml: |
+              lowercaseOutputName: true
+              lowercaseOutputLabelNames: true
+              rules: []
+
+    - name: Create the three-node KRaft KafkaNodePool
+      kubernetes.core.k8s:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        state: present
+        apply: true
+        definition:
+          apiVersion: kafka.strimzi.io/v1
+          kind: KafkaNodePool
+          metadata:
+            name: "{{ kafka_node_pool_name }}"
+            namespace: "{{ data_namespace }}"
+            labels:
+              strimzi.io/cluster: "{{ kafka_cluster_name }}"
+              app.kubernetes.io/part-of: ticketing-platform
+          spec:
+            replicas: "{{ kafka_replicas }}"
+            roles:
+              - controller
+              - broker
+            jvmOptions:
+              -Xms: 512m
+              -Xmx: 512m
+            resources:
+              requests:
+                cpu: 500m
+                memory: 1Gi
+              limits:
+                cpu: '1'
+                memory: 2Gi
+            storage:
+              type: jbod
+              volumes:
+                - id: 0
+                  type: persistent-claim
+                  size: "{{ kafka_storage_size }}"
+                  class: "{{ kafka_storage_class_name }}"
+                  deleteClaim: false
+                  kraftMetadata: shared
+            template:
+              pod:
+                affinity:
+                  nodeAffinity:
+                    requiredDuringSchedulingIgnoredDuringExecution:
+                      nodeSelectorTerms:
+                        - matchExpressions:
+                            - key: node-role.kubernetes.io/control-plane
+                              operator: DoesNotExist
+                            - key: node-role.kubernetes.io/master
+                              operator: DoesNotExist
+                  podAntiAffinity:
+                    requiredDuringSchedulingIgnoredDuringExecution:
+                      - topologyKey: "{{ worker_topology_key }}"
+                        labelSelector:
+                          matchExpressions:
+                            - key: strimzi.io/pool-name
+                              operator: In
+                              values:
+                                - "{{ kafka_node_pool_name }}"
+
+    - name: Create the Kafka KRaft Cluster
+      kubernetes.core.k8s:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        state: present
+        apply: true
+        definition:
+          apiVersion: kafka.strimzi.io/v1
+          kind: Kafka
+          metadata:
+            name: "{{ kafka_cluster_name }}"
+            namespace: "{{ data_namespace }}"
+            labels:
+              app.kubernetes.io/part-of: ticketing-platform
+          spec:
+            kafka:
+              version: "{{ kafka_version }}"
+              metadataVersion: "{{ kafka_metadata_version }}"
+              listeners:
+                - name: plain
+                  port: 9092
+                  type: internal
+                  tls: false
+              config:
+                offsets.topic.replication.factor: 3
+                transaction.state.log.replication.factor: 3
+                transaction.state.log.min.isr: 2
+                default.replication.factor: 3
+                min.insync.replicas: 2
+                unclean.leader.election.enable: false
+                auto.create.topics.enable: false
+                log.retention.hours: 24
+                log.segment.bytes: 268435456
+              metricsConfig:
+                type: jmxPrometheusExporter
+                valueFrom:
+                  configMapKeyRef:
+                    name: kafka-metrics
+                    key: kafka-metrics-config.yml
+            entityOperator:
+              topicOperator:
+                resources:
+                  requests:
+                    cpu: 50m
+                    memory: 128Mi
+                  limits:
+                    cpu: 200m
+                    memory: 256Mi
+              userOperator:
+                resources:
+                  requests:
+                    cpu: 50m
+                    memory: 128Mi
+                  limits:
+                    cpu: 200m
+                    memory: 256Mi
+            kafkaExporter:
+              groupRegex: ".*"
+              topicRegex: ".*"
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  cpu: 200m
+                  memory: 256Mi
+
+    - name: Wait for Kafka to become Ready
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - --namespace
+          - "{{ data_namespace }}"
+          - wait
+          - --for=condition=Ready
+          - "kafka/{{ kafka_cluster_name }}"
+          - --timeout=1200s
+      changed_when: false
+
+    - name: Read the Worker placement of Kafka nodes
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - --namespace
+          - "{{ data_namespace }}"
+          - get
+          - pod
+          - --selector
+          - "strimzi.io/pool-name={{ kafka_node_pool_name }}"
+          - --output
+          - 'jsonpath={range .items[*]}{.spec.nodeName}{"\n"}{end}'
+      register: kafka_nodes
+      changed_when: false
+
+    - name: Require Kafka to span three different Workers
+      ansible.builtin.assert:
+        that:
+          - (kafka_nodes.stdout_lines | reject('equalto', '') | list | length) == (kafka_replicas | int)
+          - (kafka_nodes.stdout_lines | reject('equalto', '') | unique | list | length) == (kafka_replicas | int)
+        fail_msg: >-
+          The three Kafka broker/controller Pods are not distributed across three
+          different Worker nodes. Check Local PV nodeAffinity and free resources.
+
+    - name: Create booking, payment, and validation Kafka topics
+      kubernetes.core.k8s:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        state: present
+        apply: true
+        definition:
+          apiVersion: kafka.strimzi.io/v1
+          kind: KafkaTopic
+          metadata:
+            name: "{{ item.resource_name }}"
+            namespace: "{{ data_namespace }}"
+            labels:
+              strimzi.io/cluster: "{{ kafka_cluster_name }}"
+              app.kubernetes.io/part-of: ticketing-platform
+          spec:
+            topicName: "{{ item.topic_name }}"
+            partitions: "{{ item.partitions }}"
+            replicas: "{{ kafka_replicas }}"
+            config:
+              retention.ms: "{{ item.retention_ms }}"
+              segment.bytes: 268435456
+      loop:
+        - resource_name: booking-created
+          topic_name: booking.created
+          partitions: 3
+          retention_ms: 86400000
+        - resource_name: payment-completed
+          topic_name: payment.completed
+          partitions: 3
+          retention_ms: 86400000
+        - resource_name: ansible-healthcheck
+          topic_name: ansible.healthcheck
+          partitions: 1
+          retention_ms: 3600000
+
+    - name: Wait for all Kafka topics to become Ready
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - --namespace
+          - "{{ data_namespace }}"
+          - wait
+          - --for=condition=Ready
+          - "kafkatopic/{{ item }}"
+          - --timeout=300s
+      loop:
+        - booking-created
+        - payment-completed
+        - ansible-healthcheck
+      changed_when: false
+
+    - name: Produce a Kafka validation event
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - --namespace
+          - "{{ data_namespace }}"
+          - exec
+          - -i
+          - "{{ kafka_cluster_name }}-{{ kafka_node_pool_name }}-0"
+          - -c
+          - kafka
+          - --
+          - /opt/kafka/bin/kafka-console-producer.sh
+          - --bootstrap-server
+          - localhost:9092
+          - --topic
+          - ansible.healthcheck
+      args:
+        stdin: "ticketing-kafka-ready"
+      changed_when: false
+
+    - name: Consume the Kafka validation event
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - --namespace
+          - "{{ data_namespace }}"
+          - exec
+          - "{{ kafka_cluster_name }}-{{ kafka_node_pool_name }}-0"
+          - -c
+          - kafka
+          - --
+          - /opt/kafka/bin/kafka-console-consumer.sh
+          - --bootstrap-server
+          - localhost:9092
+          - --topic
+          - ansible.healthcheck
+          - --from-beginning
+          - --max-messages
+          - '1'
+          - --timeout-ms
+          - '30000'
+      register: kafka_consume
+      changed_when: false
+
+    - name: Verify the booking Topic replication factor
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - --namespace
+          - "{{ data_namespace }}"
+          - exec
+          - "{{ kafka_cluster_name }}-{{ kafka_node_pool_name }}-0"
+          - -c
+          - kafka
+          - --
+          - /opt/kafka/bin/kafka-topics.sh
+          - --bootstrap-server
+          - localhost:9092
+          - --describe
+          - --topic
+          - booking.created
+      register: kafka_topic_description
+      changed_when: false
+
+    - name: Require Kafka produce and consume validation to pass
+      ansible.builtin.assert:
+        that:
+          - "'ticketing-kafka-ready' in kafka_consume.stdout"
+          - "'ReplicationFactor: 3' in kafka_topic_description.stdout"
+        success_msg: >-
+          Kafka HA is complete: three KRaft broker/controller nodes are Ready on
+          three Workers, topics use RF=3/minISR=2, and produce/consume succeeded.
+
+    - name: Print Kafka application endpoint and topics
+      ansible.builtin.debug:
+        msg:
+          - >-
+            Bootstrap DNS: {{ kafka_cluster_name }}-kafka-bootstrap.{{ data_namespace }}.svc.cluster.local:9092
+          - "Topics: booking.created, payment.completed"
+          - "HA: 3 KRaft broker/controller nodes, RF=3, minISR=2, one node per Worker."

@@ -1,0 +1,76 @@
+---
+- name: Read Kubernetes Worker nodes
+  ansible.builtin.command:
+    cmd: kubectl get nodes -o name
+  register: kubernetes_nodes
+  changed_when: false
+
+- name: Verify required Monitoring nodes exist
+  ansible.builtin.assert:
+    that:
+      - "'node/' + hostvars[item.key]['ansible_hostname'] in kubernetes_nodes.stdout_lines"
+    fail_msg: >-
+      Required Kubernetes node
+      {{ hostvars[item.key]['ansible_hostname'] }}
+      for {{ item.key }} does not exist.
+  loop: "{{ monitoring_storage | dict2items }}"
+
+- name: Render Monitoring Local PV manifest
+  ansible.builtin.template:
+    src: monitoring-local-pv.yml.j2
+    dest: /tmp/ticketing-monitoring-local-pv.yml
+    mode: "0600"
+  changed_when: false
+
+- name: Validate Monitoring Local PV manifest
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - apply
+      - --dry-run=server
+      - -f
+      - /tmp/ticketing-monitoring-local-pv.yml
+  changed_when: false
+
+- name: Apply Monitoring StorageClasses and Local PVs
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - apply
+      - -f
+      - /tmp/ticketing-monitoring-local-pv.yml
+  register: monitoring_apply
+  changed_when: >-
+    'created' in monitoring_apply.stdout or
+    'configured' in monitoring_apply.stdout
+
+- name: Read Monitoring Local PVs
+  ansible.builtin.command:
+    cmd: kubectl get pv -l ticketing.io/storage=monitoring -o name
+  register: monitoring_pvs
+  changed_when: false
+
+- name: Verify Monitoring Local PV count
+  ansible.builtin.assert:
+    that:
+      - monitoring_pvs.stdout_lines | length == monitoring_storage | length
+    fail_msg: >-
+      Expected {{ monitoring_storage | length }} Monitoring PVs,
+      but found {{ monitoring_pvs.stdout_lines | length }}.
+    success_msg: "All Monitoring Local PVs are available."
+
+- name: Show Monitoring Local PV status
+  ansible.builtin.command:
+    cmd: kubectl get pv -l ticketing.io/storage=monitoring -o wide
+  register: monitoring_pv_status
+  changed_when: false
+
+- name: Display Monitoring Local PV status
+  ansible.builtin.debug:
+    var: monitoring_pv_status.stdout_lines
+
+- name: Remove temporary Monitoring manifest
+  ansible.builtin.file:
+    path: /tmp/ticketing-monitoring-local-pv.yml
+    state: absent
+  changed_when: false

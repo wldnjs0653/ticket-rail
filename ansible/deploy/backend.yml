@@ -1,0 +1,278 @@
+---
+- name: Deploy an immutable Ticketing API image
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+
+    runner_kubeconfig: >-
+      {{
+        lookup('env', 'KUBECONFIG')
+        | default(lookup('env', 'HOME') + '/.kube/config', true)
+      }}
+
+    backend_namespace: app
+    backend_deployment: backend
+    backend_container: backend
+    ghcr_pull_secret: ghcr-pull-secret
+    rollout_timeout: 5m
+    kafka_brokers: >-
+      ticketing-kafka-kafka-bootstrap.data.svc.cluster.local:9092
+    kafka_client_id: ticketing-backend
+    kafka_consumer_group: ticketing-backend-consumers
+
+  pre_tasks:
+    - name: Require an immutable backend image
+      ansible.builtin.assert:
+        that:
+          - backend_image is defined
+          - backend_image | length > 0
+          - backend_image is match(
+              '^ghcr\.io/[a-z0-9._-]+/[a-z0-9._/-]+:sha-[0-9a-f]{7,64}$'
+            )
+        fail_msg: >-
+          backend_image must be an immutable GHCR image such as
+          ghcr.io/owner/ticketing-api:sha-<commit-sha>.
+
+    - name: Read the current backend Deployment
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/kubectl
+          - --kubeconfig
+          - "{{ runner_kubeconfig }}"
+          - --namespace
+          - "{{ backend_namespace }}"
+          - get
+          - deployment
+          - "{{ backend_deployment }}"
+          - -o
+          - json
+      register: deployment_before_raw
+      changed_when: false
+
+    - name: Parse the current backend Deployment
+      ansible.builtin.set_fact:
+        deployment_before: "{{ deployment_before_raw.stdout | from_json }}"
+
+    - name: Find the backend container
+      ansible.builtin.set_fact:
+        backend_container_before: >-
+          {{
+            deployment_before.spec.template.spec.containers
+            | selectattr('name', 'equalto', backend_container)
+            | list
+          }}
+
+    - name: Require exactly one backend container
+      ansible.builtin.assert:
+        that:
+          - backend_container_before | length == 1
+        fail_msg: Deployment에서 backend 컨테이너를 찾을 수 없습니다.
+
+    - name: Save the currently deployed image
+      ansible.builtin.set_fact:
+        previous_backend_image: "{{ backend_container_before[0].image }}"
+
+  tasks:
+    - name: Deploy the new backend image
+      block:
+        - name: Configure the GHCR image pull Secret
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/kubectl
+              - --kubeconfig
+              - "{{ runner_kubeconfig }}"
+              - --namespace
+              - "{{ backend_namespace }}"
+              - patch
+              - deployment
+              - "{{ backend_deployment }}"
+              - --type
+              - strategic
+              - --patch
+              - >-
+                {{
+                  {
+                    'spec': {
+                      'template': {
+                        'spec': {
+                          'imagePullSecrets': [
+                            {'name': ghcr_pull_secret}
+                          ]
+                        }
+                      }
+                    }
+                  } | to_json
+                }}
+          register: pull_secret_patch
+          changed_when: "'patched' in pull_secret_patch.stdout"
+
+        - name: Update the backend image and enable Kafka consumers
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/kubectl
+              - --kubeconfig
+              - "{{ runner_kubeconfig }}"
+              - --namespace
+              - "{{ backend_namespace }}"
+              - patch
+              - deployment
+              - "{{ backend_deployment }}"
+              - --type
+              - strategic
+              - --patch
+              - >-
+                {{
+                  {
+                    'spec': {
+                      'template': {
+                        'spec': {
+                          'containers': [
+                            {
+                              'name': backend_container,
+                              'image': backend_image,
+                              'env': [
+                                {
+                                  'name': 'SKIP_KAFKA_CONSUMERS',
+                                  'value': 'false'
+                                },
+                                {
+                                  'name': 'KAFKA_BROKERS',
+                                  'value': kafka_brokers
+                                },
+                                {
+                                  'name': 'KAFKA_CLIENT_ID',
+                                  'value': kafka_client_id
+                                },
+                                {
+                                  'name': 'KAFKA_CONSUMER_GROUP',
+                                  'value': kafka_consumer_group
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  } | to_json
+                }}
+          register: image_update
+          changed_when: >-
+            'patched' in image_update.stdout
+
+        - name: Wait for the backend rollout
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/kubectl
+              - --kubeconfig
+              - "{{ runner_kubeconfig }}"
+              - --namespace
+              - "{{ backend_namespace }}"
+              - rollout
+              - status
+              - "deployment/{{ backend_deployment }}"
+              - "--timeout={{ rollout_timeout }}"
+          changed_when: false
+
+        - name: Read the updated backend Deployment
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/kubectl
+              - --kubeconfig
+              - "{{ runner_kubeconfig }}"
+              - --namespace
+              - "{{ backend_namespace }}"
+              - get
+              - deployment
+              - "{{ backend_deployment }}"
+              - -o
+              - json
+          register: deployment_after_raw
+          changed_when: false
+
+        - name: Parse the updated backend Deployment
+          ansible.builtin.set_fact:
+            deployment_after: "{{ deployment_after_raw.stdout | from_json }}"
+
+        - name: Find the deployed backend container
+          ansible.builtin.set_fact:
+            backend_container_after: >-
+              {{
+                deployment_after.spec.template.spec.containers
+                | selectattr('name', 'equalto', backend_container)
+                | list
+              }}
+
+        - name: Verify the deployed image
+          ansible.builtin.assert:
+            that:
+              - backend_container_after | length == 1
+              - backend_container_after[0].image == backend_image
+            fail_msg: 배포된 이미지가 요청한 GHCR 이미지와 일치하지 않습니다.
+
+      rescue:
+        - name: Restore the previous backend image
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/kubectl
+              - --kubeconfig
+              - "{{ runner_kubeconfig }}"
+              - --namespace
+              - "{{ backend_namespace }}"
+              - set
+              - image
+              - "deployment/{{ backend_deployment }}"
+              - "{{ backend_container }}={{ previous_backend_image }}"
+          register: rollback_image
+          changed_when: false
+          failed_when: false
+
+        - name: Disable Kafka consumers on the restored backend
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/kubectl
+              - --kubeconfig
+              - "{{ runner_kubeconfig }}"
+              - --namespace
+              - "{{ backend_namespace }}"
+              - set
+              - env
+              - "deployment/{{ backend_deployment }}"
+              - "SKIP_KAFKA_CONSUMERS=true"
+          changed_when: false
+          failed_when: false
+
+        - name: Wait for the restored backend
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/kubectl
+              - --kubeconfig
+              - "{{ runner_kubeconfig }}"
+              - --namespace
+              - "{{ backend_namespace }}"
+              - rollout
+              - status
+              - "deployment/{{ backend_deployment }}"
+              - "--timeout={{ rollout_timeout }}"
+          register: rollback_status
+          changed_when: false
+          failed_when: false
+
+        - name: Report the failed deployment
+          ansible.builtin.fail:
+            msg: >-
+              새 이미지 배포에 실패했습니다.
+              이전 이미지 {{ previous_backend_image }}로 복구를 시도했습니다.
+              Rollback result:
+              {{ rollback_status.stdout | default('확인 불가', true) }}
+
+  post_tasks:
+    - name: Print the deployment result
+      ansible.builtin.debug:
+        msg:
+          - "Deployment: {{ backend_namespace }}/{{ backend_deployment }}"
+          - "Previous image: {{ previous_backend_image }}"
+          - "Deployed image: {{ backend_image }}"
+          - "Rollout completed successfully."

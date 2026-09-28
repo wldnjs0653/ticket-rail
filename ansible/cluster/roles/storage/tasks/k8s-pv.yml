@@ -1,0 +1,211 @@
+---
+# ============================================================
+# 1. kubectl 사용 가능 여부 확인
+# ============================================================
+
+- name: Verify kubectl is available
+  ansible.builtin.command:
+    cmd: kubectl version --client
+  changed_when: false
+
+
+# ============================================================
+# 2. Inventory IP 기준으로 실제 Kubernetes Node 이름 탐색
+#
+# worker4 10.1.93.110 -> w4
+# worker5 10.1.93.111 -> w5
+# worker6 10.1.93.112 -> w6
+# ============================================================
+
+- name: Resolve Kubernetes node name for each Data Worker
+  ansible.builtin.shell: |
+    set -o pipefail
+
+    kubectl get nodes \
+      -o 'custom-columns=NAME:.metadata.name,INTERNAL_IP:.status.addresses[?(@.type=="InternalIP")].address' \
+      --no-headers |
+    awk -v target_ip="{{ hostvars[item].ansible_host }}" \
+      '$2 == target_ip { print $1; exit }'
+  args:
+    executable: /bin/bash
+  loop: "{{ groups['data_workers'] }}"
+  register: storage_k8s_node_lookup
+  changed_when: false
+
+
+# ============================================================
+# 3. 각 Data Worker의 Kubernetes Node가 실제로 확인됐는지 검증
+# ============================================================
+
+- name: Verify Kubernetes node was found for each Data Worker
+  ansible.builtin.assert:
+    that:
+      - node_result.stdout | trim | length > 0
+    fail_msg: >-
+      Kubernetes Node를 찾을 수 없습니다.
+      inventory_host={{ node_result.item }}
+      inventory_ip={{ hostvars[node_result.item].ansible_host }}
+  loop: "{{ storage_k8s_node_lookup.results }}"
+  loop_control:
+    loop_var: node_result
+    label: "{{ node_result.item }}"
+
+
+# ============================================================
+# 4. Inventory Host -> Kubernetes Node map 생성
+# ============================================================
+
+- name: Build Data Worker Kubernetes node map
+  ansible.builtin.set_fact:
+    storage_k8s_node_map: >-
+      {{
+        storage_k8s_node_map | default({}) |
+        combine({
+          node_result.item:
+            (node_result.stdout | trim)
+        })
+      }}
+  loop: "{{ storage_k8s_node_lookup.results }}"
+  loop_control:
+    loop_var: node_result
+    label: "{{ node_result.item }}"
+
+
+# ============================================================
+# 5. 생성된 Node map 출력
+# ============================================================
+
+- name: Show resolved Data Worker node mapping
+  ansible.builtin.debug:
+    var: storage_k8s_node_map
+
+
+# ============================================================
+# 6. Local PV manifest 렌더링
+# ============================================================
+
+- name: Create temporary Local PV manifest
+  ansible.builtin.template:
+    src: data-local-pv.yml.j2
+    dest: /tmp/ticketing-data-local-pv.yml
+    mode: "0600"
+  changed_when: false
+
+
+# ============================================================
+# 7. Kubernetes 서버 기준 manifest 검증
+# ============================================================
+
+- name: Validate Local PV manifest
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - apply
+      - --dry-run=server
+      - -f
+      - /tmp/ticketing-data-local-pv.yml
+  changed_when: false
+
+
+# ============================================================
+# 8. StorageClass / PV 적용
+# ============================================================
+
+- name: Apply StorageClasses and Local PVs
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - apply
+      - -f
+      - /tmp/ticketing-data-local-pv.yml
+  register: storage_k8s_apply
+  changed_when: >-
+    'created' in storage_k8s_apply.stdout or
+    'configured' in storage_k8s_apply.stdout
+
+
+- name: Show apply result
+  ansible.builtin.debug:
+    var: storage_k8s_apply.stdout_lines
+
+
+# ============================================================
+# 9. 생성된 Data Local PV 확인
+# ============================================================
+
+- name: Read Data Local PVs
+  ansible.builtin.command:
+    cmd: kubectl get pv -l ticketing.io/storage=data -o name
+  register: storage_k8s_pvs
+  changed_when: false
+
+
+# ============================================================
+# 10. 기대 PV 수 자동 계산
+#
+# service 수 × data worker 수
+# 현재: 3 × 3 = 9
+# ============================================================
+
+- name: Calculate expected Data Local PV count
+  ansible.builtin.set_fact:
+    storage_expected_pv_count: >-
+      {{
+        (storage_partitions | length)
+        *
+        (groups['data_workers'] | length)
+      }}
+
+
+- name: Verify Data Local PV count
+  ansible.builtin.assert:
+    that:
+      - (storage_k8s_pvs.stdout_lines | length) ==
+        (storage_expected_pv_count | int)
+    fail_msg: >-
+      Data Local PV 수가 예상과 다릅니다.
+      expected={{ storage_expected_pv_count }}
+      actual={{ storage_k8s_pvs.stdout_lines | length }}
+    success_msg: >-
+      Data Local PV {{ storage_expected_pv_count }}개가 모두 확인되었습니다.
+
+
+# ============================================================
+# 11. StorageClass 확인
+# ============================================================
+
+- name: Read StorageClasses
+  ansible.builtin.command:
+    cmd: kubectl get storageclass
+  register: storage_k8s_storageclasses
+  changed_when: false
+
+- name: Show StorageClasses
+  ansible.builtin.debug:
+    var: storage_k8s_storageclasses.stdout_lines
+
+
+# ============================================================
+# 12. 최종 Data Local PV 상태 확인
+# ============================================================
+
+- name: Read final Local PV status
+  ansible.builtin.command:
+    cmd: kubectl get pv -l ticketing.io/storage=data -o wide
+  register: storage_k8s_pv_status
+  changed_when: false
+
+- name: Show final Local PV status
+  ansible.builtin.debug:
+    var: storage_k8s_pv_status.stdout_lines
+
+
+# ============================================================
+# 13. 임시 manifest 삭제
+# ============================================================
+
+- name: Remove temporary Local PV manifest
+  ansible.builtin.file:
+    path: /tmp/ticketing-data-local-pv.yml
+    state: absent
+  changed_when: false

@@ -1,0 +1,220 @@
+---
+# ============================================================
+# 1. 서비스별 Local PV mount directory 준비
+# ============================================================
+
+- name: Create service mount directories
+  ansible.builtin.file:
+    path: "{{ partition.mount_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ storage_partitions }}"
+  loop_control:
+    loop_var: partition
+    label: "{{ partition.name }}"
+
+
+# ============================================================
+# 2. 현재 해당 경로가 이미 mount point인지 확인
+# ============================================================
+
+- name: Check existing mount points
+  ansible.builtin.command:
+    argv:
+      - mountpoint
+      - -q
+      - "{{ partition.mount_path }}"
+  loop: "{{ storage_partitions }}"
+  loop_control:
+    loop_var: partition
+    label: "{{ partition.name }}"
+  register: storage_existing_mountpoints
+  changed_when: false
+  failed_when: false
+
+
+# ============================================================
+# 3. 아직 mount되지 않은 경로에 기존 데이터가 있는지 확인
+#
+# 새 filesystem을 기존 데이터가 들어 있는 디렉터리 위에 바로
+# mount하면 기존 데이터가 가려지므로 중단한다.
+# ============================================================
+
+- name: Check unmounted directories for existing data
+  ansible.builtin.shell: |
+    if [ -n "$(find "{{ mount_result.partition.mount_path }}" \
+      -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
+      echo NOT_EMPTY
+    else
+      echo EMPTY
+    fi
+  args:
+    executable: /bin/bash
+  loop: "{{ storage_existing_mountpoints.results }}"
+  loop_control:
+    loop_var: mount_result
+    label: "{{ mount_result.partition.name }}"
+  register: storage_mount_directory_state
+  changed_when: false
+  when:
+    - mount_result.rc != 0
+
+
+- name: Stop if unmounted Local PV directory contains data
+  ansible.builtin.assert:
+    that:
+      - directory_result.stdout | trim == "EMPTY"
+    fail_msg: >-
+      중단: {{ directory_result.mount_result.partition.mount_path }}에
+      기존 데이터가 남아 있습니다.
+      새 Data filesystem을 mount하면 기존 데이터가 가려질 수 있으므로
+      workload 중지 및 기존 데이터 정리 여부를 먼저 확인해야 합니다.
+  loop: "{{ storage_mount_directory_state.results }}"
+  loop_control:
+    loop_var: directory_result
+    label: "{{ directory_result.mount_result.partition.name }}"
+  when:
+    - not (directory_result.skipped | default(false))
+
+
+# ============================================================
+# 4. 각 Data filesystem UUID 조회
+# ============================================================
+
+- name: Read filesystem UUIDs
+  ansible.builtin.command:
+    argv:
+      - blkid
+      - -s
+      - UUID
+      - -o
+      - value
+      - "{{ storage_partition_devices[partition.name] }}"
+  loop: "{{ storage_partitions }}"
+  loop_control:
+    loop_var: partition
+    label: "{{ partition.name }}"
+  register: storage_uuid_results
+  changed_when: false
+
+
+# ============================================================
+# 5. UUID 존재 여부 확인
+# ============================================================
+
+- name: Verify filesystem UUIDs
+  ansible.builtin.assert:
+    that:
+      - uuid_result.stdout | trim | length > 0
+    fail_msg: >-
+      중단:
+      {{ storage_partition_devices[uuid_result.partition.name] }}의
+      filesystem UUID를 확인할 수 없습니다.
+  loop: "{{ storage_uuid_results.results }}"
+  loop_control:
+    loop_var: uuid_result
+    label: "{{ uuid_result.partition.name }}"
+
+
+# ============================================================
+# 6. 서비스별 UUID map 생성
+# ============================================================
+
+- name: Build filesystem UUID map
+  ansible.builtin.set_fact:
+    storage_partition_uuids: >-
+      {{
+        storage_partition_uuids | default({}) |
+        combine({
+          uuid_result.partition.name:
+            (uuid_result.stdout | trim)
+        })
+      }}
+  loop: "{{ storage_uuid_results.results }}"
+  loop_control:
+    loop_var: uuid_result
+    label: "{{ uuid_result.partition.name }}"
+
+
+# ============================================================
+# 7. UUID 기준 영구 mount
+#
+# /dev/sda, /dev/sdb 이름이 재부팅 후 변경되어도
+# filesystem UUID를 기준으로 동일 경로에 mount한다.
+# ansible.posix.mount가 /etc/fstab도 함께 관리한다.
+# ============================================================
+
+- name: Mount data partitions by UUID
+  ansible.posix.mount:
+    path: "{{ partition.mount_path }}"
+    src: "UUID={{ storage_partition_uuids[partition.name] }}"
+    fstype: xfs
+    opts: defaults
+    dump: "0"
+    passno: "0"
+    state: mounted
+  loop: "{{ storage_partitions }}"
+  loop_control:
+    loop_var: partition
+    label: "{{ partition.name }}"
+
+
+# ============================================================
+# 8. 최종 mount point 확인
+# ============================================================
+
+- name: Verify data mount points
+  ansible.builtin.command:
+    argv:
+      - mountpoint
+      - -q
+      - "{{ partition.mount_path }}"
+  loop: "{{ storage_partitions }}"
+  loop_control:
+    loop_var: partition
+    label: "{{ partition.name }}"
+  changed_when: false
+
+
+# ============================================================
+# 9. 실제 mount된 filesystem UUID 재확인
+# ============================================================
+
+- name: Read mounted filesystem UUIDs
+  ansible.builtin.shell: |
+    set -o pipefail
+
+    mounted_source=$(findmnt -rn -T "{{ partition.mount_path }}" -o SOURCE)
+
+    blkid \
+      -s UUID \
+      -o value \
+      "$mounted_source"
+  args:
+    executable: /bin/bash
+  loop: "{{ storage_partitions }}"
+  loop_control:
+    loop_var: partition
+    label: "{{ partition.name }}"
+  register: storage_mounted_uuid_results
+  changed_when: false
+
+
+- name: Verify mounted filesystem UUIDs
+  ansible.builtin.assert:
+    that:
+      - mounted_result.stdout | trim ==
+        storage_partition_uuids[mounted_result.partition.name]
+    fail_msg: >-
+      중단: {{ mounted_result.partition.mount_path }}에
+      예상한 filesystem이 mount되지 않았습니다.
+      expected_uuid={{
+        storage_partition_uuids[mounted_result.partition.name]
+      }}
+      actual_uuid={{ mounted_result.stdout | trim }}
+  loop: "{{ storage_mounted_uuid_results.results }}"
+  loop_control:
+    loop_var: mounted_result
+    label: "{{ mounted_result.partition.name }}"

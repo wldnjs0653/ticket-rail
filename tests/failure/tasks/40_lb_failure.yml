@@ -1,0 +1,200 @@
+---
+- name: Select the active and standby API Load Balancers
+  ansible.builtin.set_fact:
+    lb_failure_target: "{{ active_lb_before }}"
+    lb_standby_target: "{{ (groups['load_balancers'] | difference([active_lb_before])) | first }}"
+    lb_probe_output: "{{ failure_test_run_dir }}/lb-failure-probe.jsonl"
+    lb_probe_stop_file: "{{ failure_test_run_dir }}/lb-failure.stop"
+
+- name: Remove a previous Load Balancer probe stop file
+  ansible.builtin.file:
+    path: "{{ lb_probe_stop_file }}"
+    state: absent
+
+- name: Start continuous Kubernetes API requests during LB failover
+  ansible.builtin.command:
+    argv:
+      - "{{ python_bin }}"
+      - "{{ playbook_dir }}/../scripts/probe_command.py"
+      - --interval
+      - "{{ probe_interval_seconds | string }}"
+      - --max-duration
+      - "180"
+      - --stop-file
+      - "{{ lb_probe_stop_file }}"
+      - --output
+      - "{{ lb_probe_output }}"
+      - --
+      - "{{ kubectl_bin }}"
+      - --kubeconfig
+      - "{{ kubeconfig_path }}"
+      - get
+      - --raw=/readyz
+  async: 210
+  poll: 0
+  register: lb_probe_job
+  changed_when: true
+
+- name: Allow Load Balancer baseline samples
+  ansible.builtin.wait_for:
+    timeout: 3
+  changed_when: false
+
+- name: Record the Load Balancer fault start time
+  ansible.builtin.command:
+    argv: [date, "+%s%3N"]
+  register: lb_fault_start_ms
+  changed_when: false
+
+- name: Simulate and recover the active API Load Balancer
+  block:
+    - name: Stop Keepalived on the active Load Balancer
+      ansible.builtin.systemd_service:
+        name: keepalived
+        state: stopped
+      delegate_to: "{{ lb_failure_target }}"
+      become: true
+
+    - name: Stop HAProxy on the active Load Balancer
+      ansible.builtin.systemd_service:
+        name: haproxy
+        state: stopped
+      delegate_to: "{{ lb_failure_target }}"
+      become: true
+
+    - name: Wait for the standby Load Balancer to own the API VIP
+      ansible.builtin.command:
+        argv: [ip, -4, addr, show]
+      delegate_to: "{{ lb_standby_target }}"
+      register: standby_vip_state
+      changed_when: false
+      until: kubernetes_api_vip in standby_vip_state.stdout
+      retries: 30
+      delay: 1
+
+    - name: Record the API VIP failover time
+      ansible.builtin.command:
+        argv: [date, "+%s%3N"]
+      register: lb_failover_end_ms
+      changed_when: false
+
+    - name: Hold the Load Balancer outage briefly
+      ansible.builtin.wait_for:
+        timeout: 5
+      changed_when: false
+
+  always:
+    - name: Record the Load Balancer restore command time
+      ansible.builtin.command:
+        argv: [date, "+%s%3N"]
+      register: lb_restore_start_ms
+      changed_when: false
+
+    - name: Start HAProxy on the original Load Balancer
+      ansible.builtin.systemd_service:
+        name: haproxy
+        state: started
+        enabled: true
+      delegate_to: "{{ lb_failure_target }}"
+      become: true
+
+    - name: Start Keepalived on the original Load Balancer
+      ansible.builtin.systemd_service:
+        name: keepalived
+        state: started
+        enabled: true
+      delegate_to: "{{ lb_failure_target }}"
+      become: true
+
+- name: Collect stable API responses after Load Balancer recovery
+  ansible.builtin.wait_for:
+    timeout: 5
+  changed_when: false
+
+- name: Stop the Load Balancer API probe
+  ansible.builtin.file:
+    path: "{{ lb_probe_stop_file }}"
+    state: touch
+    mode: "0640"
+
+- name: Wait for the Load Balancer probe job
+  ansible.builtin.async_status:
+    jid: "{{ lb_probe_job.ansible_job_id }}"
+  register: lb_probe_job_status
+  until: lb_probe_job_status.finished
+  retries: 30
+  delay: 1
+  changed_when: false
+
+- name: Analyze the Load Balancer failure probe
+  ansible.builtin.command:
+    argv:
+      - "{{ python_bin }}"
+      - "{{ playbook_dir }}/../scripts/analyze_probe.py"
+      - --input
+      - "{{ lb_probe_output }}"
+      - --stable-successes
+      - "{{ stable_success_count | string }}"
+      - --fault-time-ms
+      - "{{ lb_fault_start_ms.stdout }}"
+  register: lb_probe_analysis
+  changed_when: false
+
+- name: Parse the Load Balancer probe summary
+  ansible.builtin.set_fact:
+    lb_probe_summary: "{{ lb_probe_analysis.stdout | from_json }}"
+
+- name: Recheck API VIP ownership
+  ansible.builtin.command:
+    argv: [ip, -4, addr, show]
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['load_balancers'] }}"
+  register: lb_vip_checks_after
+  changed_when: false
+
+- name: Find the API VIP owner after recovery
+  ansible.builtin.set_fact:
+    active_lb_after_candidates: >-
+      {{
+        lb_vip_checks_after.results
+        | selectattr('stdout', 'search', kubernetes_api_vip)
+        | map(attribute='item')
+        | list
+      }}
+
+- name: Require exactly one API VIP owner after recovery
+  ansible.builtin.assert:
+    that:
+      - active_lb_after_candidates | length == 1
+    fail_msg: "복구 후 API VIP 소유자가 비정상입니다: {{ active_lb_after_candidates }}"
+
+- name: Record the final Load Balancer recovery time
+  ansible.builtin.command:
+    argv: [date, "+%s%3N"]
+  register: lb_final_ms
+  changed_when: false
+
+- name: Record the API Load Balancer result
+  ansible.builtin.set_fact:
+    failure_results: >-
+      {{
+        failure_results | combine({
+          'api_load_balancer_failure': {
+            'status': ((lb_probe_summary.failures | int) == 0)
+              | ternary('PASS_NO_IMPACT', 'PASS_WITH_IMPACT'),
+            'active_before': lb_failure_target,
+            'failover_target': lb_standby_target,
+            'active_after': active_lb_after_candidates | first,
+            'fault_at_epoch_ms': lb_fault_start_ms.stdout | int,
+            'failover_at_epoch_ms': lb_failover_end_ms.stdout | int,
+            'restore_started_at_epoch_ms': lb_restore_start_ms.stdout | int,
+            'final_at_epoch_ms': lb_final_ms.stdout | int,
+            'vip_failover_seconds':
+              (((lb_failover_end_ms.stdout | int) - (lb_fault_start_ms.stdout | int)) / 1000) | round(3),
+            'restore_recovery_seconds':
+              (((lb_final_ms.stdout | int) - (lb_restore_start_ms.stdout | int)) / 1000) | round(3),
+            'api_probe': lb_probe_summary
+          }
+        })
+      }}
+

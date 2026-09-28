@@ -1,0 +1,42 @@
+---
+- name: Enable protected mode
+  ansible.builtin.lineinfile:
+    path: /etc/redis/redis.conf
+    regexp: '^protected-mode '
+    line: 'protected-mode yes'
+  notify: Restart Redis
+
+- name: Set Redis port
+  ansible.builtin.lineinfile:
+    path: /etc/redis/redis.conf
+    regexp: '^port '
+    line: 'port 6379'
+  notify: Restart Redis
+
+- name: Enable AOF persistence
+  ansible.builtin.lineinfile:
+    path: /etc/redis/redis.conf
+    regexp: '^appendonly '
+    line: 'appendonly yes'
+  notify: Restart Redis
+
+- name: Set AOF fsync policy
+  ansible.builtin.lineinfile:
+    path: /etc/redis/redis.conf
+    regexp: '^appendfsync '
+    line: 'appendfsync everysec'
+  notify: Restart Redis
+
+- name: Set Redis data directory
+  ansible.builtin.lineinfile:
+    path: /etc/redis/redis.conf
+    regexp: '^dir '
+    line: 'dir /var/lib/redis'
+  notify: Restart Redis
+
+- name: Set Redis bind address
+  ansible.builtin.lineinfile:
+    path: /etc/redis/redis.conf
+    regexp: '^bind '
+    line: 'bind 127.0.0.1 10.1.93.110'
+  notify: Restart Redis

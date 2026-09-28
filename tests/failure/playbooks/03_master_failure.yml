@@ -1,0 +1,4 @@
+---
+- import_playbook: run_one.yml
+  vars:
+    test_scenario: master

@@ -1,0 +1,17 @@
+---
+- name: Deploy Redis ACL file
+  ansible.builtin.template:
+    src: users.acl.j2
+    dest: /etc/redis/users.acl
+    owner: redis
+    group: redis
+    mode: '0640'
+  notify: Restart Redis
+  no_log: true
+
+- name: Configure Redis ACL file
+  ansible.builtin.lineinfile:
+    path: /etc/redis/redis.conf
+    regexp: '^#?\s*aclfile '
+    line: 'aclfile /etc/redis/users.acl'
+  notify: Restart Redis

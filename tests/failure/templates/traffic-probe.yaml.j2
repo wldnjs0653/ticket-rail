@@ -1,0 +1,106 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ traffic_test_namespace }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ traffic_test_name }}
+  namespace: {{ traffic_test_namespace }}
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ traffic_test_name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ traffic_test_name }}
+    spec:
+      nodeSelector:
+        ticketing.io/workload: app
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: {{ traffic_test_name }}
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              printf 'pod=%s\nnode=%s\n' "$POD_NAME" "$NODE_NAME" > /usr/share/nginx/html/index.html
+              exec nginx -g 'daemon off;'
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          ports:
+            - name: http
+              containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 2
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 20m
+              memory: 24Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ traffic_test_name }}
+  namespace: {{ traffic_test_namespace }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ traffic_test_name }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ traffic_test_name }}
+  namespace: {{ traffic_test_namespace }}
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - {{ traffic_test_host }}
+      secretName: {{ traffic_test_tls_secret }}
+  rules:
+    - host: {{ traffic_test_host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ traffic_test_name }}
+                port:
+                  name: http
+

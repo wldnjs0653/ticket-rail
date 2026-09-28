@@ -1,0 +1,31 @@
+---
+- name: Configure MetalLB
+  hosts: localhost
+  connection: local
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Apply MetalLB IPAddressPool and L2Advertisement
+      ansible.builtin.command:
+        cmd: kubectl apply -f -
+        stdin: |
+          apiVersion: metallb.io/v1beta1
+          kind: IPAddressPool
+          metadata:
+            name: ticketing-pool
+            namespace: metallb-system
+          spec:
+            addresses:
+              - 10.1.93.69/32
+          ---
+          apiVersion: metallb.io/v1beta1
+          kind: L2Advertisement
+          metadata:
+            name: ticketing-l2
+            namespace: metallb-system
+          spec:
+            ipAddressPools:
+              - ticketing-pool
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf

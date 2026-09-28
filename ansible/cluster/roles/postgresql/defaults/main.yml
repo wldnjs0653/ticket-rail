@@ -1,0 +1,23 @@
+---
+postgresql_version: "16"
+postgresql_service_name: postgresql
+postgresql_data_dir: /var/lib/pgsql/data
+postgresql_port: 5432
+postgresql_listen_addresses:
+  - "127.0.0.1"
+  - "{{ ansible_default_ipv4.address }}"
+postgresql_allowed_clients:
+  - "10.1.93.66/32"
+  - "10.1.93.67/32"
+  - "10.1.93.68/32"
+postgresql_firewall_zone: public
+postgresql_database: ticketing
+postgresql_app_user: ticketing_app
+postgresql_app_connection_limit: 60
+postgresql_max_connections: 100
+postgresql_shared_buffers: 512MB
+postgresql_effective_cache_size: 1536MB
+postgresql_work_mem: 4MB
+postgresql_maintenance_work_mem: 128MB
+postgresql_timezone: UTC
+postgresql_log_min_duration_statement: 500

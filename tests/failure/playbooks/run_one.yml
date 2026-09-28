@@ -1,0 +1,152 @@
+---
+- name: Run exactly one ticketing failure scenario
+  hosts: controller
+  gather_facts: false
+  any_errors_fatal: true
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+
+  vars:
+    failure_results: {}
+    scenario_failed: false
+    isolated_probe_deployed: false
+    scenario_task_map:
+      pod: ../tasks/10_pod_autohealing.yml
+      worker: ../tasks/20_worker_failure.yml
+      master: ../tasks/30_master_failure.yml
+      lb: ../tasks/40_lb_failure.yml
+      redis: ../tasks/50_redis_failover.yml
+      postgresql: ../tasks/60_postgresql_failover.yml
+      kafka: ../tasks/70_kafka_failure.yml
+
+  pre_tasks:
+    - name: Require one supported scenario and explicit approval
+      ansible.builtin.assert:
+        that:
+          - test_scenario is defined
+          - test_scenario in scenario_task_map
+          - confirm_disruptive_tests | default('NO') == 'YES'
+        fail_msg: >-
+          test_scenario=pod|worker|master|lb|redis|postgresql|kafka와
+          confirm_disruptive_tests=YES가 필요합니다.
+
+    - name: Materialize one immutable run ID
+      ansible.builtin.set_fact:
+        failure_test_run_id: >-
+          {{ requested_test_id | default(
+            test_scenario ~ '-' ~ lookup('pipe', 'date -u +%Y%m%d-%H%M%S'), true
+          ) }}
+
+    - name: Validate the run ID
+      ansible.builtin.assert:
+        that:
+          - failure_test_run_id is match('^[A-Za-z0-9._-]+$')
+          - failure_test_run_id not in ['.', '..']
+        fail_msg: TEST_ID에는 영문·숫자·점·밑줄·하이픈만 사용할 수 있습니다.
+
+    - name: Materialize one immutable result directory
+      ansible.builtin.set_fact:
+        failure_test_run_dir: "{{ results_root }}/{{ failure_test_run_id }}"
+
+    - name: Check whether the result directory already exists
+      ansible.builtin.stat:
+        path: "{{ failure_test_run_dir }}"
+      register: existing_result_directory
+
+    - name: Refuse to overwrite an existing test run
+      ansible.builtin.assert:
+        that:
+          - not existing_result_directory.stat.exists
+        fail_msg: "이미 존재하는 TEST_ID입니다: {{ failure_test_run_id }}"
+
+    - name: Create scenario result directory
+      ansible.builtin.file:
+        path: "{{ failure_test_run_dir }}"
+        state: directory
+        mode: "0750"
+
+    - name: Record scenario metadata
+      ansible.builtin.copy:
+        dest: "{{ failure_test_run_dir }}/00-scenario.txt"
+        mode: "0640"
+        content: |
+          test_scenario={{ test_scenario }}
+          run_id={{ failure_test_run_id }}
+          started_at_utc={{ lookup('pipe', 'date -u -Ins') }}
+          worker_target={{ worker_failure_target }}
+          master_target={{ master_failure_target }}
+          grafana_pre_fault_observation_seconds={{ grafana_pre_fault_observation_seconds }}
+          grafana_post_recovery_observation_seconds={{ grafana_post_recovery_observation_seconds }}
+
+  tasks:
+    - name: Execute the selected scenario
+      block:
+        - name: Run blocking prechecks
+          ansible.builtin.include_tasks: ../tasks/00_precheck.yml
+
+        - name: Deploy isolated probe for Pod or Worker test
+          ansible.builtin.include_tasks: ../tasks/05_deploy_probe.yml
+          when: test_scenario in ['pod', 'worker']
+
+        - name: Mark the isolated probe as deployed
+          ansible.builtin.set_fact:
+            isolated_probe_deployed: true
+          when: test_scenario in ['pod', 'worker']
+
+        - name: Keep the healthy probe long enough for a Prometheus baseline
+          ansible.builtin.wait_for:
+            timeout: "{{ grafana_pre_fault_observation_seconds | int }}"
+          changed_when: false
+          when:
+            - isolated_probe_deployed | bool
+            - grafana_pre_fault_observation_seconds | int > 0
+
+        - name: Run selected failure test
+          ansible.builtin.include_tasks: "{{ scenario_task_map[test_scenario] }}"
+
+      rescue:
+        - name: Mark the scenario as failed
+          ansible.builtin.set_fact:
+            scenario_failed: true
+            failure_results: >-
+              {{
+                failure_results | combine({
+                  test_scenario: {
+                    'status': 'FAIL',
+                    'failed_task': ansible_failed_task.name | default('unknown'),
+                    'error': ansible_failed_result.msg | default(
+                      ansible_failed_result.stderr | default('unknown error')
+                    )
+                  }
+                })
+              }}
+
+        - name: Stop probes before emergency recovery
+          ansible.builtin.include_tasks: ../tasks/94_stop_probes.yml
+
+        - name: Run emergency recovery
+          ansible.builtin.include_tasks: ../tasks/99_recovery.yml
+
+      always:
+        - name: Stop any scenario probe jobs
+          ansible.builtin.include_tasks: ../tasks/94_stop_probes.yml
+
+        - name: Keep the recovered probe long enough for a Prometheus sample
+          ansible.builtin.wait_for:
+            timeout: "{{ grafana_post_recovery_observation_seconds | int }}"
+          changed_when: false
+          when:
+            - isolated_probe_deployed | bool
+            - grafana_post_recovery_observation_seconds | int > 0
+
+        - name: Remove isolated probe after Pod or Worker test
+          ansible.builtin.include_tasks: ../tasks/95_cleanup_probe.yml
+          when: test_scenario in ['pod', 'worker']
+
+        - name: Collect final state and render report
+          ansible.builtin.include_tasks: ../tasks/90_collect_report.yml
+
+    - name: Stop with failure after recovery and evidence collection
+      ansible.builtin.fail:
+        msg: "시험 실패. 복구를 실행했습니다: {{ failure_test_run_dir }}"
+      when: scenario_failed | bool

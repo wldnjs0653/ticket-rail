@@ -1,0 +1,69 @@
+---
+# Resolve the project directory from the location of the playbooks so the
+# automation continues to work if the whole folder is moved.
+project_root: "{{ playbook_dir | dirname }}"
+
+nodejs_version: 24.20.0
+nodejs_arch_map:
+  x86_64: x64
+  aarch64: arm64
+nodejs_install_root: /opt
+
+controller_kubeconfig: /root/.kube/config
+controller_venv: /opt/ticket-rail-venv
+controller_python: /opt/ticket-rail-venv/bin/python
+ansible_core_version: 2.19.4
+kubernetes_core_version: 6.5.0
+app_namespace: app
+data_namespace: data
+kafka_cluster_name: ticketing-kafka
+kafka_node_pool_name: dual-role
+# Use service.namespace instead of hard-coding the cluster DNS suffix.
+# Kubernetes expands this name using the Pod DNS search domains, so it also
+# works on clusters whose domain is not cluster.local.
+kafka_bootstrap: ticketing-kafka-kafka-bootstrap.data:9092
+booking_topic: booking.created
+payment_topic: payment.completed
+
+app_replica_count: 2
+app_version: 1.0.0
+image_prefix: localhost/ticketing
+image_archive_dir: /var/tmp/ticketing-consumer-images
+worker_image_dir: /var/tmp/ticketing-consumer-images
+
+mock_payment_image: "{{ image_prefix }}/mock-payment:{{ app_version }}"
+mock_notification_image: "{{ image_prefix }}/mock-notification:{{ app_version }}"
+payment_consumer_image: "{{ image_prefix }}/payment-consumer:{{ app_version }}"
+notification_consumer_image: "{{ image_prefix }}/notification-consumer:{{ app_version }}"
+
+ticketing_images:
+  - name: mock-payment
+    image: "{{ mock_payment_image }}"
+    context: "{{ project_root }}/mock-payment"
+    archive: "{{ image_archive_dir }}/mock-payment.tar"
+  - name: mock-notification
+    image: "{{ mock_notification_image }}"
+    context: "{{ project_root }}/mock-notification"
+    archive: "{{ image_archive_dir }}/mock-notification.tar"
+  - name: payment-consumer
+    image: "{{ payment_consumer_image }}"
+    context: "{{ project_root }}/payment-consumer"
+    archive: "{{ image_archive_dir }}/payment-consumer.tar"
+  - name: notification-consumer
+    image: "{{ notification_consumer_image }}"
+    context: "{{ project_root }}/notification-consumer"
+    archive: "{{ image_archive_dir }}/notification-consumer.tar"
+
+mock_payment_name: ticketing-mock-payment
+mock_payment_dir: "{{ project_root }}/mock-payment"
+mock_payment_port: 8080
+
+mock_notification_name: ticketing-mock-notification
+mock_notification_dir: "{{ project_root }}/mock-notification"
+mock_notification_port: 8081
+
+payment_consumer_port: 8082
+notification_consumer_port: 8083
+backend_consumer_image: ghcr.io/your-org/ticketing-api:replace-me
+backend_consumer_port: 8084
+backend_consumer_secret: backend-secret

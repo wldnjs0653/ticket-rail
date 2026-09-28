@@ -1,0 +1,11 @@
+---
+- name: Validate backend metrics collection
+  hosts: ansible_controller
+  gather_facts: false
+  vars_files:
+    - "{{ playbook_dir }}/../group_vars/all.yml"
+
+  roles:
+    - role: backend_monitoring
+      vars:
+        backend_monitoring_run_runtime_validation: true

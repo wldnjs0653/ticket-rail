@@ -1,0 +1,173 @@
+---
+- name: Validate the complete Kafka payment and notification flow
+  hosts: localhost
+  connection: local
+  become: true
+  gather_facts: true
+
+  vars_files:
+    - vars/main.yml
+
+  vars:
+    application_deployments:
+      - mock-payment
+      - mock-notification
+      - payment-consumer
+      - notification-consumer
+    health_checks:
+      - deployment: mock-payment
+        port: "{{ mock_payment_port }}"
+      - deployment: mock-notification
+        port: "{{ mock_notification_port }}"
+      - deployment: payment-consumer
+        port: "{{ payment_consumer_port }}"
+      - deployment: notification-consumer
+        port: "{{ notification_consumer_port }}"
+
+  tasks:
+    - name: Wait for every Deployment to be Available
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - --namespace
+          - "{{ app_namespace }}"
+          - wait
+          - --for=condition=Available
+          - "deployment/{{ item }}"
+          - --timeout=300s
+      loop: "{{ application_deployments }}"
+      changed_when: false
+
+    - name: Verify every in-Pod readiness endpoint
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - --namespace
+          - "{{ app_namespace }}"
+          - exec
+          - "deployment/{{ item.deployment }}"
+          - --
+          - node
+          - -e
+          - >-
+            fetch('http://127.0.0.1:{{ item.port }}/health/ready')
+            .then(async response => {
+              console.log(await response.text());
+              if (!response.ok) process.exit(1);
+            })
+      loop: "{{ health_checks }}"
+      loop_control:
+        label: "{{ item.deployment }}"
+      changed_when: false
+
+    - name: Define a unique end-to-end booking
+      ansible.builtin.set_fact:
+        validation_booking_id: "{{ ansible_date_time.epoch | int }}"
+        validation_event_id: "ansible-e2e-{{ ansible_date_time.epoch }}"
+
+    - name: Define the booking.created validation event
+      ansible.builtin.set_fact:
+        validation_booking_event:
+          event_id: "{{ validation_event_id }}"
+          event_type: booking.created
+          aggregate_id: "booking-{{ validation_booking_id }}"
+          occurred_at: "{{ ansible_date_time.iso8601 }}"
+          version: 1
+          payload:
+            booking_id: "{{ validation_booking_id | int }}"
+            user_id: 10
+            amount: 50000
+            currency: KRW
+
+    - name: Produce the booking.created validation event
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - --namespace
+          - "{{ data_namespace }}"
+          - exec
+          - -i
+          - "{{ kafka_cluster_name }}-{{ kafka_node_pool_name }}-0"
+          - -c
+          - kafka
+          - --
+          - /opt/kafka/bin/kafka-console-producer.sh
+          - --bootstrap-server
+          - localhost:9092
+          - --topic
+          - "{{ booking_topic }}"
+      args:
+        stdin: "{{ validation_booking_event | to_json }}"
+      changed_when: true
+
+    - name: Wait for the matching payment.completed event
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - --namespace
+          - "{{ data_namespace }}"
+          - exec
+          - "{{ kafka_cluster_name }}-{{ kafka_node_pool_name }}-0"
+          - -c
+          - kafka
+          - --
+          - /opt/kafka/bin/kafka-console-consumer.sh
+          - --bootstrap-server
+          - localhost:9092
+          - --topic
+          - "{{ payment_topic }}"
+          - --from-beginning
+          - --timeout-ms
+          - '10000'
+      register: payment_events
+      changed_when: false
+      failed_when: false
+      retries: 12
+      delay: 5
+      until: validation_event_id in payment_events.stdout
+
+    - name: Wait for Notification Consumer to process the same booking
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - --namespace
+          - "{{ app_namespace }}"
+          - logs
+          - --selector
+          - app.kubernetes.io/name=notification-consumer
+          - --all-containers=true
+          - --since=10m
+          - --prefix=true
+      register: notification_logs
+      changed_when: false
+      failed_when: false
+      retries: 12
+      delay: 5
+      until: (validation_booking_id | string) in notification_logs.stdout
+
+    - name: Require the complete event flow
+      ansible.builtin.assert:
+        that:
+          - validation_event_id in payment_events.stdout
+          - (validation_booking_id | string) in notification_logs.stdout
+        success_msg: >-
+          booking.created -> Mock Payment -> payment.completed -> Mock Notification
+          completed successfully for booking {{ validation_booking_id }}.
+
+    - name: Print the final Kubernetes service summary
+      ansible.builtin.debug:
+        msg:
+          - "Namespace: {{ app_namespace }}"
+          - "Mock Payment replicas: {{ app_replica_count }}"
+          - "Mock Notification replicas: {{ app_replica_count }}"
+          - "Payment Consumer replicas: {{ app_replica_count }}"
+          - "Notification Consumer replicas: {{ app_replica_count }}"
+          - "Kafka: {{ kafka_bootstrap }}"
+          - "Flow test booking: {{ validation_booking_id }}"
+          - "Result: PASSED"
+

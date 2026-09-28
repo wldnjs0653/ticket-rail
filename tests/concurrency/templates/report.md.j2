@@ -1,0 +1,60 @@
+# 동일 좌석 동시성 시험
+
+- Run ID: `{{ run_id }}`
+- 결과: **{{ test_state }}**
+- 대상: `{{ base_url }}`, 이벤트 {{ event_id }}, 좌석 {{ seat_id }}
+- 사용자: {{ user_ids | join(', ') }} / 사용자별 선점 1회
+- TLS 인증서 검증 활성화, 리다이렉트 비허용
+- 실행: Ansible → k6 → Ansible의 읽기 전용 DB 조회
+
+| 확인 항목 | 결과 |
+|---|---|
+| k6 종료 코드 | {{ k6_exit_code if k6_exit_code is not none else '미실행/미확인' }} |
+| API 선점 1건·충돌 4건·예약 1건 및 사용자 일치 | {{ api_ok }} |
+| 클라이언트 요청 공통 겹침 시간 | {{ overlap_ms if overlap_ms is not none else '미측정' }} ms |
+| 클라이언트 요청 시작 시각의 최대 차이 | {{ start_spread_ms if start_spread_ms is not none else '미측정' }} ms |
+| 공통 겹침 및 출발 지연 {{ max_start_lateness_ms }} ms 이하 | {{ timing_ok }} |
+| DB 예약·좌석 연결 단일성 및 결제 완료 | {{ db_ok }} |
+
+## 선점 요청 원자료
+
+시각은 실행 서버의 Unix epoch 밀리초다. 요청 직전부터 응답 직후까지이며 연결·TLS 시간이 포함될 수 있다.
+
+| 사용자 | 좌석 | 목표 시각 | 요청 시작 | 응답 완료 | 출발 지연 ms | HTTP 상태 |
+|---|---|---|---|---|---|---|
+{% for r in hold_records | sort(attribute='user_id') %}
+| {{ r.user_id }} | {{ r.seat_id }} | {{ r.target_ms }} | {{ r.start_ms }} | {{ r.end_ms }} | {{ r.lateness_ms }} | {{ r.status }} |
+{% endfor %}
+
+## 예약 및 DB 직접 조회
+
+예약 응답 기록:
+
+```json
+{{ booking_records | to_nice_json }}
+```
+
+마지막 DB 관측:
+
+```json
+{{ db_snapshot | to_nice_json }}
+```
+
+{% if error_message %}
+## 실행 오류
+
+{{ error_message }}
+{% endif %}
+
+## 근거와 범위
+
+- `events.log`: k6의 사용자별 실제 요청 기록. `requests.csv`는 해당 기록을 Ansible이 변환한 자료.
+- `points.json`, `summary.json`: k6 원시 지표와 요약. setup의 큐 요청 및 재확인 요청도 포함.
+- `db-before-raw.json`, `precheck.sql`: 빈 좌석 사전 확인.
+- `verify.sql`, `db-history.json`: 실행한 SQL과 각 조회의 stdout·행·오류. DB 상태는 조회 시점의 결과.
+- `settings.json`, `source/`: 실제 설정과 실행에 사용한 소스 사본.
+- `PASS`: API·요청 겹침·DB 모두 충족. `INCONCLUSIVE`: API와 DB는 충족했지만 요청 겹침/출발 정렬 미확인.
+- `FAIL`: API 또는 DB 조건 미충족. `ERROR`: 실행·수집·해석 실패. 둘 다 자동 재실행하지 않음.
+- 겹침은 **클라이언트의 요청 진행 구간**이다. 서버 내부 잠금 구간의 동시 실행을 증명하지 않는다.
+- 선점 성공자만 예약한다. 5명의 예약 API 동시 호출, 대규모 부하, 외부 결제/알림의 중복 부작용 검증은 범위에 포함하지 않는다.
+- Prometheus remote write는 선택 출력이며 전달 완전성은 이 판정에서 확인하지 않는다. 실제 화면 캡처는 별도로 보관한다.

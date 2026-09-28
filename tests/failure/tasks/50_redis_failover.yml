@@ -1,0 +1,145 @@
+---
+- name: Find the current Redis Primary Pod
+  ansible.builtin.shell: |
+    set -euo pipefail
+    sentinel=$("{{ kubectl_bin }}" get pod -n "{{ data_namespace }}"       -l app.kubernetes.io/name=redis       --field-selector=status.phase=Running       -o jsonpath='{.items[0].metadata.name}')
+    addr=$("{{ kubectl_bin }}" exec -n "{{ data_namespace }}" "$sentinel" -c sentinel --       sh -lc 'export REDISCLI_AUTH="$REDIS_PASSWORD"; redis-cli -p 26379 --raw SENTINEL get-master-addr-by-name "{{ redis_master_name }}" | sed -n "1p"')
+    case "$addr" in
+      redis-*) printf '%s\n' "${addr%%.*}" ;;
+      *)
+        "{{ kubectl_bin }}" get pod -n "{{ data_namespace }}"           -l app.kubernetes.io/name=redis           -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.status.podIP}{"\n"}{end}'           | awk -F'|' -v addr="$addr" '$2 == addr {print $1; exit}'
+        ;;
+    esac
+  args:
+    executable: /bin/bash
+  register: redis_primary_before
+  changed_when: false
+  failed_when: redis_primary_before.stdout | trim == ""
+
+- name: Write and replicate the Redis marker
+  ansible.builtin.shell: |
+    set -euo pipefail
+    "{{ kubectl_bin }}" exec -n "{{ data_namespace }}" "{{ redis_primary_before.stdout | trim }}" -c redis --       sh -lc 'export REDISCLI_AUTH="$REDIS_PASSWORD"; redis-cli SET "failure-test:{{ failure_test_run_id }}" "{{ failure_test_run_id }}"; redis-cli WAIT 1 5000'
+  args:
+    executable: /bin/bash
+  register: redis_marker_write
+  changed_when: true
+  failed_when: >-
+    redis_marker_write.rc != 0
+    or 'OK' not in redis_marker_write.stdout
+    or (redis_marker_write.stdout_lines | last | int) < 1
+
+- name: Record the Redis fault start time
+  ansible.builtin.command:
+    argv: [date, "+%s%3N"]
+  register: redis_fault_start_ms
+  changed_when: false
+
+- name: Delete the Redis Primary Pod
+  ansible.builtin.command:
+    argv:
+      - "{{ kubectl_bin }}"
+      - delete
+      - pod
+      - "{{ redis_primary_before.stdout | trim }}"
+      - -n
+      - "{{ data_namespace }}"
+      - --wait=false
+  changed_when: true
+
+- name: Wait for a different Redis Primary
+  ansible.builtin.shell: |
+    set -euo pipefail
+    deadline=$((SECONDS + {{ data_failover_timeout_seconds }}))
+    while (( SECONDS < deadline )); do
+      sentinel=$("{{ kubectl_bin }}" get pod -n "{{ data_namespace }}"         -l app.kubernetes.io/name=redis         --field-selector=status.phase=Running         -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+      if [[ -n "$sentinel" ]]; then
+        addr=$("{{ kubectl_bin }}" exec -n "{{ data_namespace }}" "$sentinel" -c sentinel --           sh -lc 'export REDISCLI_AUTH="$REDIS_PASSWORD"; redis-cli -p 26379 --raw SENTINEL get-master-addr-by-name "{{ redis_master_name }}" | sed -n "1p"' 2>/dev/null || true)
+        new_primary=""
+        case "$addr" in
+          redis-*) new_primary="${addr%%.*}" ;;
+          "")
+            new_primary=""
+            ;;
+          *)
+            new_primary=$("{{ kubectl_bin }}" get pod -n "{{ data_namespace }}"               -l app.kubernetes.io/name=redis               -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.status.podIP}{"\n"}{end}'               | awk -F'|' -v addr="$addr" '$2 == addr {print $1; exit}')
+            ;;
+        esac
+        if [[ -n "$new_primary" && "$new_primary" != "{{ redis_primary_before.stdout | trim }}" ]]; then
+          printf '%s\n' "$new_primary"
+          exit 0
+        fi
+      fi
+      sleep 1
+    done
+    exit 1
+  args:
+    executable: /bin/bash
+  register: redis_primary_after
+  changed_when: false
+
+- name: Record the Redis failover time
+  ansible.builtin.command:
+    argv: [date, "+%s%3N"]
+  register: redis_failover_end_ms
+  changed_when: false
+
+- name: Verify the Redis marker on the new Primary
+  ansible.builtin.shell: |
+    set -euo pipefail
+    "{{ kubectl_bin }}" exec -n "{{ data_namespace }}" "{{ redis_primary_after.stdout | trim }}" -c redis --       sh -lc 'export REDISCLI_AUTH="$REDIS_PASSWORD"; redis-cli --raw GET "failure-test:{{ failure_test_run_id }}"'
+  args:
+    executable: /bin/bash
+  register: redis_marker_read
+  changed_when: false
+  failed_when: redis_marker_read.stdout | trim != failure_test_run_id
+
+- name: Wait for all Redis replicas after failover
+  ansible.builtin.command:
+    argv:
+      - "{{ kubectl_bin }}"
+      - rollout
+      - status
+      - "statefulset/{{ redis_statefulset }}"
+      - -n
+      - "{{ data_namespace }}"
+      - --timeout=240s
+  changed_when: false
+
+- name: Record the final Redis recovery time
+  ansible.builtin.command:
+    argv: [date, "+%s%3N"]
+  register: redis_final_ms
+  changed_when: false
+
+- name: Remove the Redis marker
+  ansible.builtin.shell: |
+    set -euo pipefail
+    "{{ kubectl_bin }}" exec -n "{{ data_namespace }}" "{{ redis_primary_after.stdout | trim }}" -c redis --       sh -lc 'export REDISCLI_AUTH="$REDIS_PASSWORD"; redis-cli DEL "failure-test:{{ failure_test_run_id }}"'
+  args:
+    executable: /bin/bash
+  changed_when: true
+  failed_when: false
+
+- name: Record the Redis failover result
+  ansible.builtin.set_fact:
+    failure_results: >-
+      {{
+        failure_results | combine({
+          'redis_primary_failover': {
+            'status': 'PASS',
+            'primary_before': redis_primary_before.stdout | trim,
+            'primary_after': redis_primary_after.stdout | trim,
+            'fault_at_epoch_ms': redis_fault_start_ms.stdout | int,
+            'failover_at_epoch_ms': redis_failover_end_ms.stdout | int,
+            'final_at_epoch_ms': redis_final_ms.stdout | int,
+            'failover_seconds':
+              (((redis_failover_end_ms.stdout | int) - (redis_fault_start_ms.stdout | int)) / 1000) | round(3),
+            'full_recovery_seconds':
+              (((redis_final_ms.stdout | int) - (redis_fault_start_ms.stdout | int)) / 1000) | round(3),
+            'marker_preserved': true
+          }
+        })
+      }}
+
+

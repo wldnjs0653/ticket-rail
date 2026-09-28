@@ -1,0 +1,38 @@
+---
+- name: Validate shared Kubernetes and storage prerequisites
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/main.yml
+  vars:
+    ansible_python_interpreter: "{{ controller_python }}"
+
+  tasks:
+    - name: Run the shared cluster prerequisite checks
+      ansible.builtin.include_tasks: tasks/cluster_prerequisites.yml
+      vars:
+        required_storage_class_names: "{{ all_storage_class_names }}"
+
+    - name: Show available local PersistentVolumes
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - get
+          - persistentvolume
+          - -o
+          - wide
+      register: pv_list
+      changed_when: false
+      failed_when: false
+
+    - name: Print prerequisite summary
+      ansible.builtin.debug:
+        msg:
+          - "Kubernetes API: ready"
+          - "Required StorageClasses: {{ all_storage_class_names | join(', ') }}"
+          - "Data namespace: {{ data_namespace }}"
+          - "Monitoring namespace: {{ monitoring_namespace }}"
+          - "PV status (informational):"
+          - "{{ pv_list.stdout_lines | default([]) }}"

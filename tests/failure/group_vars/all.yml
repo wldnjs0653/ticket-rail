@@ -1,0 +1,50 @@
+---
+kubeconfig_path: /root/.kube/config
+kubectl_bin: kubectl
+python_bin: python3
+
+kubernetes_api_vip: "10.1.93.65"
+kubernetes_api_endpoint: "https://10.1.93.65:6443"
+service_vip: "10.1.93.69"
+
+traffic_test_namespace: failure-test
+traffic_test_name: failure-test-nginx
+traffic_test_host: failure-test.ticketing.local
+traffic_test_url: "https://failure-test.ticketing.local/"
+traffic_test_connect_ip: "10.1.93.69"
+traffic_test_tls_secret: failure-test-tls
+# 실습용 Ingress 인증서가 자체 서명이거나 VIP가 인증서 SAN에 없으면 false를 유지한다.
+# 공인 또는 내부 CA 신뢰 구성이 끝난 경우에만 true로 변경한다.
+traffic_tls_verify: false
+
+app_namespace: app
+data_namespace: data
+monitoring_namespace: monitoring
+ingress_namespace: ingress-nginx
+
+worker_failure_target: w2
+master_failure_target: m1
+
+redis_statefulset: redis
+redis_master_name: ticketing-master
+postgresql_cluster: ticketing-postgresql
+kafka_cluster: ticketing-kafka
+kafka_nodepool: dual-role
+
+probe_interval_seconds: 0.5
+stable_success_count: 5
+# P-01/N-01의 임시 NGINX가 Prometheus에 최소 한 번 수집되도록 유지한다.
+# 현재 확인된 최대 scrape 주기 30초에 5초 여유를 둔다.
+grafana_pre_fault_observation_seconds: 35
+grafana_post_recovery_observation_seconds: 35
+node_notready_timeout_seconds: 90
+node_ready_timeout_seconds: 180
+data_failover_timeout_seconds: 180
+
+results_root: "{{ playbook_dir }}/../results"
+
+# Optional k6 package. k6 scripts are run separately from the load-generator host.
+k6_package_root: "{{ playbook_dir }}/../../k6"
+backend_base_url: "https://api.ticketing.local"
+backend_health_path: "/healthz"
+

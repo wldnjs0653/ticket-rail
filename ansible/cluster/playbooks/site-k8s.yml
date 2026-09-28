@@ -1,0 +1,11 @@
+---
+- import_playbook: 01-common.yml
+- import_playbook: 02-k8s-common.yml
+- import_playbook: 03-containerd.yml
+- import_playbook: 04-k8s-prereq.yml
+- import_playbook: 05-kubernetes.yml
+- import_playbook: 06-lb.yml
+- import_playbook: 07-k8s-init.yml
+- import_playbook: 08-control-plane-join.yml
+- import_playbook: 09-cni.yml
+- import_playbook: 10-worker-join.yml

@@ -1,0 +1,28 @@
+---
+- name: Check failure-test prerequisites without causing an outage
+  hosts: controller
+  gather_facts: false
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+  vars:
+    failure_results: {}
+  tasks:
+    - name: Materialize the precheck run ID
+      ansible.builtin.set_fact:
+        failure_test_run_id: >-
+          {{ requested_test_id | default(
+            'precheck-' ~ lookup('pipe', 'date -u +%Y%m%d-%H%M%S'), true
+          ) }}
+    - name: Materialize the precheck result directory
+      ansible.builtin.set_fact:
+        failure_test_run_dir: "{{ results_root }}/{{ failure_test_run_id }}"
+    - name: Create the result directory
+      ansible.builtin.file:
+        path: "{{ failure_test_run_dir }}"
+        state: directory
+        mode: "0750"
+    - name: Run prechecks
+      ansible.builtin.include_tasks: ../tasks/00_precheck.yml
+    - name: Collect state and render the report
+      ansible.builtin.include_tasks: ../tasks/90_collect_report.yml
+

@@ -1,0 +1,18 @@
+---
+- name: Install Redis
+  ansible.builtin.import_tasks: install.yml
+
+- name: Configure Redis
+  ansible.builtin.import_tasks: config.yml
+
+- name: Configure Redis authentication
+  ansible.builtin.import_tasks: auth.yml
+
+- name: Apply Redis configuration changes
+  ansible.builtin.meta: flush_handlers
+
+- name: Verify Redis
+  ansible.builtin.import_tasks: verify.yml
+
+- name: Configure Redis firewall
+  ansible.builtin.import_tasks: firewall.yml

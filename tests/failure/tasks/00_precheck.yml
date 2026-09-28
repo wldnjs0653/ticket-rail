@@ -1,0 +1,281 @@
+---
+- name: Require the expected inventory groups
+  ansible.builtin.assert:
+    that:
+      - groups['load_balancers'] | length == 2
+      - groups['control_plane'] | length == 3
+      - groups['application_workers'] | length == 3
+      - groups['data_workers'] | length == 3
+      - worker_failure_target in groups['application_workers']
+      - master_failure_target in groups['control_plane']
+    fail_msg: inventory.ini의 노드 구성과 장애 대상 변수를 확인하십시오.
+
+- name: Verify SSH access to every remote host
+  ansible.builtin.ping:
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['load_balancers'] + groups['control_plane'] + groups['application_workers'] + groups['data_workers'] }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Require NTP synchronization on every remote host
+  ansible.builtin.command:
+    argv: [timedatectl, show, -p, NTPSynchronized, --value]
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['load_balancers'] + groups['control_plane'] + groups['application_workers'] + groups['data_workers'] }}"
+  register: remote_ntp_checks
+  changed_when: false
+  failed_when: remote_ntp_checks.stdout | trim != "yes"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Verify the Kubernetes API
+  ansible.builtin.command:
+    argv:
+      - "{{ kubectl_bin }}"
+      - --kubeconfig
+      - "{{ kubeconfig_path }}"
+      - get
+      - --raw=/readyz
+  register: kubernetes_readyz
+  changed_when: false
+  failed_when: kubernetes_readyz.rc != 0 or 'ok' not in kubernetes_readyz.stdout
+
+- name: Require the HA API endpoint in kubeconfig
+  ansible.builtin.command:
+    argv:
+      - "{{ kubectl_bin }}"
+      - --kubeconfig
+      - "{{ kubeconfig_path }}"
+      - config
+      - view
+      - --minify
+      - -o
+      - "jsonpath={.clusters[0].cluster.server}"
+  register: configured_api_endpoint
+  changed_when: false
+  failed_when: configured_api_endpoint.stdout | trim != kubernetes_api_endpoint
+
+- name: Require every Kubernetes node to be Ready
+  ansible.builtin.shell: |
+    set -euo pipefail
+    expected="m1 m2 m3 w1 w2 w3 w4 w5 w6"
+    for node in $expected; do
+      status=$("{{ kubectl_bin }}" get node "$node" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+      [[ "$status" == "True" ]] || { echo "$node Ready=$status" >&2; exit 1; }
+    done
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Require active Pods in each workload Namespace to be Running and Ready
+  ansible.builtin.shell: |
+    set -euo pipefail
+    rows=$("{{ kubectl_bin }}" get pod -n "{{ item }}" \
+      --field-selector=status.phase!=Succeeded,status.phase!=Failed \
+      -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.status.phase}{"|"}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}')
+    [[ -n "$rows" ]] || { echo "{{ item }}: active Pod 없음" >&2; exit 1; }
+    bad=$(printf '%s\n' "$rows" | awk -F'|' '$2 != "Running" || $3 != "True" {print}')
+    [[ -z "$bad" ]] || { printf '%s\n' "$bad" >&2; exit 1; }
+  args:
+    executable: /bin/bash
+  loop:
+    - "{{ app_namespace }}"
+    - "{{ data_namespace }}"
+    - "{{ monitoring_namespace }}"
+    - "{{ ingress_namespace }}"
+  changed_when: false
+  loop_control:
+    label: "{{ item }}"
+
+- name: Require every existing PVC to be Bound
+  ansible.builtin.shell: |
+    set -euo pipefail
+    rows=$("{{ kubectl_bin }}" get pvc -A -o jsonpath='{range .items[*]}{.metadata.namespace}{"/"}{.metadata.name}{"|"}{.status.phase}{"\n"}{end}')
+    bad=$(printf '%s\n' "$rows" | awk -F'|' 'NF > 1 && $2 != "Bound" {print}')
+    [[ -z "$bad" ]] || { printf '%s\n' "$bad" >&2; exit 1; }
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Require all Redis replicas
+  ansible.builtin.command:
+    argv:
+      - "{{ kubectl_bin }}"
+      - rollout
+      - status
+      - "statefulset/{{ redis_statefulset }}"
+      - -n
+      - "{{ data_namespace }}"
+      - --timeout=180s
+  changed_when: false
+
+- name: Require one Redis Primary and two Replicas
+  ansible.builtin.shell: |
+    set -euo pipefail
+    pods=$("{{ kubectl_bin }}" get pod -n "{{ data_namespace }}" \
+      -l app.kubernetes.io/name=redis \
+      -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
+    masters=0
+    replicas=0
+    while read -r pod; do
+      [[ -n "$pod" ]] || continue
+      role=$("{{ kubectl_bin }}" exec -n "{{ data_namespace }}" "$pod" -c redis -- \
+        sh -lc 'export REDISCLI_AUTH="$REDIS_PASSWORD"; redis-cli --raw ROLE | sed -n "1p"')
+      case "$role" in
+        master) masters=$((masters + 1)) ;;
+        slave) replicas=$((replicas + 1)) ;;
+        *) echo "$pod role=$role" >&2; exit 1 ;;
+      esac
+    done <<< "$pods"
+    [[ "$masters" -eq 1 && "$replicas" -eq 2 ]] || {
+      echo "Redis topology: primary=$masters replica=$replicas" >&2
+      exit 1
+    }
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Require Redis Sentinel quorum
+  ansible.builtin.shell: |
+    set -euo pipefail
+    sentinel=$("{{ kubectl_bin }}" get pod -n "{{ data_namespace }}" \
+      -l app.kubernetes.io/name=redis --field-selector=status.phase=Running \
+      -o jsonpath='{.items[0].metadata.name}')
+    result=$("{{ kubectl_bin }}" exec -n "{{ data_namespace }}" "$sentinel" -c sentinel -- \
+      sh -lc 'export REDISCLI_AUTH="$REDIS_PASSWORD"; redis-cli -p 26379 --raw SENTINEL ckquorum "{{ redis_master_name }}"')
+    [[ "$result" == OK* ]] || { echo "$result" >&2; exit 1; }
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Read ready PostgreSQL instances
+  ansible.builtin.command:
+    argv:
+      - "{{ kubectl_bin }}"
+      - get
+      - cluster
+      - "{{ postgresql_cluster }}"
+      - -n
+      - "{{ data_namespace }}"
+      - -o
+      - "jsonpath={.status.readyInstances}"
+  register: postgresql_ready_instances
+  changed_when: false
+  failed_when: postgresql_ready_instances.stdout | trim | int != 3
+
+- name: Require Kafka to be Ready
+  ansible.builtin.command:
+    argv:
+      - "{{ kubectl_bin }}"
+      - get
+      - kafka
+      - "{{ kafka_cluster }}"
+      - -n
+      - "{{ data_namespace }}"
+      - -o
+      - 'jsonpath={.status.conditions[?(@.type=="Ready")].status}'
+  register: kafka_ready_condition
+  changed_when: false
+  failed_when: kafka_ready_condition.stdout | trim != "True"
+
+- name: Require three Ready Kafka Broker Pods
+  ansible.builtin.shell: |
+    set -euo pipefail
+    rows=$("{{ kubectl_bin }}" get pod -n "{{ data_namespace }}" \
+      -l "strimzi.io/name={{ kafka_cluster }}-kafka" \
+      -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}')
+    total=$(printf '%s\n' "$rows" | sed '/^$/d' | wc -l)
+    ready=$(printf '%s\n' "$rows" | awk -F'|' '$2 == "True" {count++} END {print count+0}')
+    [[ "$total" -eq 3 && "$ready" -eq 3 ]] || { printf '%s\n' "$rows" >&2; exit 1; }
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Require no under-replicated Kafka partitions
+  ansible.builtin.shell: |
+    set -euo pipefail
+    broker=$("{{ kubectl_bin }}" get pod -n "{{ data_namespace }}" \
+      -l "strimzi.io/name={{ kafka_cluster }}-kafka" \
+      --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')
+    output=$("{{ kubectl_bin }}" exec -n "{{ data_namespace }}" "$broker" -- \
+      /opt/kafka/bin/kafka-topics.sh \
+      --bootstrap-server "{{ kafka_cluster }}-kafka-bootstrap:9092" \
+      --describe --under-replicated-partitions)
+    [[ -z "$(printf '%s' "$output" | tr -d '[:space:]')" ]] || { echo "$output" >&2; exit 1; }
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Keep critical collectors and operators off the Worker fault target
+  ansible.builtin.shell: |
+    set -euo pipefail
+    rows=$("{{ kubectl_bin }}" get pod -A -o jsonpath='{range .items[*]}{.metadata.namespace}{"|"}{.metadata.name}{"|"}{.spec.nodeName}{"\n"}{end}')
+    # node-exporter and loki-canary are DaemonSets and are expected on every
+    # Worker. Grafana is a presentation layer; losing it briefly does not lose
+    # Prometheus samples, so report it as a warning instead of blocking.
+    conflicts=$(printf '%s\n' "$rows" \
+      | awk -F'|' -v node="{{ worker_failure_target }}" \
+        '$3 == node \
+         && $2 !~ /(node-exporter|loki-canary|grafana|alertmanager)/ \
+         && $2 ~ /(prometheus|loki|kube-state-metrics|cloudnative-pg|strimzi-cluster-operator)/ {print}')
+    visualization=$(printf '%s\n' "$rows" \
+      | awk -F'|' -v node="{{ worker_failure_target }}" \
+        '$3 == node && $2 ~ /grafana/ {print}')
+    if [[ -n "$visualization" ]]; then
+      printf 'WARN: Grafana UI will be unavailable while %s is down; Prometheus data must be reviewed after recovery.\n%s\n' \
+        "{{ worker_failure_target }}" "$visualization"
+    fi
+    [[ -z "$conflicts" ]] || { printf '%s\n' "$conflicts" >&2; exit 1; }
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Check which Load Balancer owns the API VIP
+  ansible.builtin.command:
+    argv: [ip, -4, addr, show]
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['load_balancers'] }}"
+  register: lb_vip_checks
+  changed_when: false
+  loop_control:
+    label: "{{ item }}"
+
+- name: Select the active API Load Balancer
+  ansible.builtin.set_fact:
+    active_lb_candidates: >-
+      {{
+        lb_vip_checks.results
+        | selectattr('stdout', 'search', kubernetes_api_vip)
+        | map(attribute='item')
+        | list
+      }}
+
+- name: Require exactly one active API Load Balancer
+  ansible.builtin.assert:
+    that:
+      - active_lb_candidates | length == 1
+    fail_msg: "API VIP {{ kubernetes_api_vip }} 소유자가 정확히 한 대가 아닙니다: {{ active_lb_candidates }}"
+
+- name: Record the active API Load Balancer
+  ansible.builtin.set_fact:
+    active_lb_before: "{{ active_lb_candidates | first }}"
+
+- name: Save the precheck result
+  ansible.builtin.copy:
+    dest: "{{ failure_test_run_dir }}/precheck.txt"
+    mode: "0640"
+    content: |
+      Kubernetes API: {{ kubernetes_readyz.stdout | trim }}
+      API endpoint: {{ configured_api_endpoint.stdout | trim }}
+      Remote NTP: synchronized
+      Nodes: all Ready
+      Active Pods: Running and Ready
+      PVCs: all existing claims Bound
+      Redis topology: 1 Primary + 2 Replicas, Sentinel quorum OK
+      Active Load Balancer: {{ active_lb_before }}
+      PostgreSQL ready instances: {{ postgresql_ready_instances.stdout | trim }}
+      Kafka Ready: {{ kafka_ready_condition.stdout | trim }}, Brokers=3, under-replicated=0
+      Observability/operator placement: outside {{ worker_failure_target }}
+
+
+

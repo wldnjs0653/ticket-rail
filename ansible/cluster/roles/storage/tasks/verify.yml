@@ -1,0 +1,107 @@
+---
+# ============================================================
+# 1. 최종 Data 디스크 구조 확인
+# ============================================================
+
+- name: Read final storage layout
+  ansible.builtin.command:
+    argv:
+      - lsblk
+      - -o
+      - NAME,SIZE,FSTYPE,LABEL,MOUNTPOINTS
+      - "{{ storage_device }}"
+  register: storage_final_layout
+  changed_when: false
+
+- name: Show final storage layout
+  ansible.builtin.debug:
+    var: storage_final_layout.stdout_lines
+
+
+# ============================================================
+# 2. 모든 Data Local PV 경로가 mount point인지 확인
+# ============================================================
+
+- name: Verify data mount points
+  ansible.builtin.command:
+    argv:
+      - mountpoint
+      - -q
+      - "{{ partition.mount_path }}"
+  loop: "{{ storage_partitions }}"
+  loop_control:
+    loop_var: partition
+    label: "{{ partition.name }}"
+  changed_when: false
+
+
+# ============================================================
+# 3. 실제 mount된 filesystem 정보 확인
+# ============================================================
+
+- name: Read mounted filesystem information
+  ansible.builtin.shell: |
+    set -o pipefail
+
+    mounted_source=$(findmnt -rn \
+      -T "{{ partition.mount_path }}" \
+      -o SOURCE)
+
+    mounted_fstype=$(findmnt -rn \
+      -T "{{ partition.mount_path }}" \
+      -o FSTYPE)
+
+    mounted_uuid=$(blkid \
+      -s UUID \
+      -o value \
+      "$mounted_source")
+
+    printf '%s|%s|%s\n' \
+      "$mounted_source" \
+      "$mounted_fstype" \
+      "$mounted_uuid"
+  args:
+    executable: /bin/bash
+  loop: "{{ storage_partitions }}"
+  loop_control:
+    loop_var: partition
+    label: "{{ partition.name }}"
+  register: storage_mounted_filesystems
+  changed_when: false
+
+
+# ============================================================
+# 4. filesystem 종류와 UUID 최종 검증
+# ============================================================
+
+- name: Verify mounted filesystem configuration
+  ansible.builtin.assert:
+    that:
+      - (mount_result.stdout.split('|') | length) == 3
+      - mount_result.stdout.split('|')[1] == "xfs"
+      - mount_result.stdout.split('|')[2] ==
+        storage_partition_uuids[mount_result.partition.name]
+    fail_msg: >-
+      중단: {{ mount_result.partition.mount_path }}의 최종 mount 상태가
+      예상과 일치하지 않습니다.
+      expected_fstype=xfs
+      expected_uuid={{
+        storage_partition_uuids[mount_result.partition.name]
+      }}
+      actual={{ mount_result.stdout }}
+  loop: "{{ storage_mounted_filesystems.results }}"
+  loop_control:
+    loop_var: mount_result
+    label: "{{ mount_result.partition.name }}"
+
+
+# ============================================================
+# 5. 최종 결과 출력
+# ============================================================
+
+- name: Storage verification passed
+  ansible.builtin.debug:
+    msg: >-
+      Data storage verification passed on {{ inventory_hostname }}.
+      device={{ storage_device }},
+      partitions={{ storage_partitions | length }}

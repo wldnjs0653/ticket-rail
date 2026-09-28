@@ -1,0 +1,119 @@
+---
+- name: Validate PostgreSQL target
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == "RedHat"
+      - ansible_distribution_major_version == "9"
+      - ansible_default_ipv4.address == "10.1.93.111"
+    fail_msg: "이 Role은 10.1.93.111의 EL9 서버에만 적용합니다."
+
+- name: Validate application password
+  ansible.builtin.assert:
+    that:
+      - postgresql_app_password is defined
+      - postgresql_app_password | length >= 16
+  no_log: true
+
+- name: Enable PostgreSQL 16 module stream
+  ansible.builtin.command:
+    cmd: "dnf -y module enable postgresql:{{ postgresql_version }}"
+  register: module_enable
+  changed_when: "'Nothing to do.' not in module_enable.stdout"
+
+- name: Install PostgreSQL and support packages
+  ansible.builtin.dnf:
+    name:
+      - postgresql-server
+      - postgresql-contrib
+      - python3-psycopg2
+      - firewalld
+      - python3-firewall
+      - acl
+    state: present
+
+- name: Check database initialization
+  ansible.builtin.stat:
+    path: "{{ postgresql_data_dir }}/PG_VERSION"
+  register: pg_version_file
+
+- name: Initialize database cluster
+  ansible.builtin.command:
+    cmd: postgresql-setup --initdb
+  when: not pg_version_file.stat.exists
+
+- name: Deploy postgresql.conf
+  ansible.builtin.template:
+    src: postgresql.conf.j2
+    dest: "{{ postgresql_data_dir }}/postgresql.conf"
+    owner: postgres
+    group: postgres
+    mode: "0600"
+    backup: true
+  notify: Restart PostgreSQL
+
+- name: Deploy pg_hba.conf
+  ansible.builtin.template:
+    src: pg_hba.conf.j2
+    dest: "{{ postgresql_data_dir }}/pg_hba.conf"
+    owner: postgres
+    group: postgres
+    mode: "0600"
+    backup: true
+  notify: Restart PostgreSQL
+
+- name: Enable and start services
+  ansible.builtin.service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - firewalld
+    - "{{ postgresql_service_name }}"
+
+- name: Allow PostgreSQL from Worker nodes only
+  ansible.posix.firewalld:
+    zone: "{{ postgresql_firewall_zone }}"
+    rich_rule: 'rule family="ipv4" source address="{{ item }}" port port="{{ postgresql_port }}" protocol="tcp" accept'
+    permanent: true
+    immediate: true
+    state: enabled
+  loop: "{{ postgresql_allowed_clients }}"
+
+- name: Apply pending restart
+  ansible.builtin.meta: flush_handlers
+
+- name: Create application user
+  become_user: postgres
+  community.postgresql.postgresql_user:
+    name: "{{ postgresql_app_user }}"
+    password: "{{ postgresql_app_password }}"
+    encrypted: true
+    conn_limit: "{{ postgresql_app_connection_limit }}"
+    role_attr_flags: "LOGIN,NOSUPERUSER,NOCREATEDB,NOCREATEROLE,NOREPLICATION"
+    state: present
+  environment:
+    PGOPTIONS: "-c password_encryption=scram-sha-256"
+  no_log: true
+
+- name: Create ticketing database
+  become_user: postgres
+  community.postgresql.postgresql_db:
+    name: "{{ postgresql_database }}"
+    owner: "{{ postgresql_app_user }}"
+    encoding: UTF8
+    state: present
+
+- name: Verify application TCP authentication
+  community.postgresql.postgresql_query:
+    login_host: 127.0.0.1
+    login_port: "{{ postgresql_port }}"
+    login_user: "{{ postgresql_app_user }}"
+    login_password: "{{ postgresql_app_password }}"
+    db: "{{ postgresql_database }}"
+    query: "SELECT current_database(), current_user, version();"
+  register: postgresql_login_test
+  changed_when: false
+
+- name: Show login verification
+  ansible.builtin.debug:
+    var: postgresql_login_test.query_result

@@ -1,0 +1,12 @@
+---
+- name: Signal every possible continuous probe to stop
+  ansible.builtin.file:
+    path: "{{ failure_test_run_dir }}/{{ item }}"
+    state: touch
+    mode: "0640"
+  loop:
+    - pod-autohealing.stop
+    - worker-failure.stop
+    - master-failure.stop
+    - lb-failure.stop
+  changed_when: false

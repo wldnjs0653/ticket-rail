@@ -1,0 +1,161 @@
+---
+- name: Prepare the Ansible Controller for Node.js development
+  hosts: localhost
+  connection: local
+  become: true
+  gather_facts: true
+
+  vars_files:
+    - vars/main.yml
+
+  tasks:
+    - name: Require a supported Linux architecture
+      ansible.builtin.assert:
+        that:
+          - ansible_architecture in nodejs_arch_map
+        fail_msg: "Unsupported architecture: {{ ansible_architecture }}"
+
+    - name: Select the Node.js download architecture
+      ansible.builtin.set_fact:
+        nodejs_dist_arch: "{{ nodejs_arch_map[ansible_architecture] }}"
+
+    - name: Define Node.js paths
+      ansible.builtin.set_fact:
+        nodejs_archive_name: "node-v{{ nodejs_version }}-linux-{{ nodejs_dist_arch }}.tar.xz"
+        nodejs_install_dir: "{{ nodejs_install_root }}/node-v{{ nodejs_version }}-linux-{{ nodejs_dist_arch }}"
+
+    - name: Install operating-system prerequisites
+      ansible.builtin.dnf:
+        name:
+          - ca-certificates
+          - python3.11
+          - python3.11-pip
+          - tar
+          - xz
+          - podman
+        state: present
+
+    - name: Create the dedicated Kubernetes Python environment when missing
+      ansible.builtin.command:
+        argv:
+          - python3.11
+          - -m
+          - venv
+          - "{{ controller_venv }}"
+        creates: "{{ controller_python }}"
+
+    - name: Install the Ansible Kubernetes Python dependencies
+      ansible.builtin.pip:
+        executable: "{{ controller_venv }}/bin/pip"
+        name:
+          - "ansible-core=={{ ansible_core_version }}"
+          - kubernetes>=24.2.0
+          - PyYAML>=3.11
+          - jsonpatch
+        state: present
+
+    - name: Install the pinned Kubernetes collection in the persistent user path
+      ansible.builtin.command:
+        argv:
+          - "{{ controller_venv }}/bin/ansible-galaxy"
+          - collection
+          - install
+          - --requirements-file
+          - "{{ playbook_dir }}/requirements.yml"
+      register: collection_install
+      changed_when: "'was installed successfully' in collection_install.stdout"
+
+    - name: Download the official Node.js LTS archive
+      ansible.builtin.get_url:
+        url: "https://nodejs.org/dist/v{{ nodejs_version }}/{{ nodejs_archive_name }}"
+        dest: "/var/tmp/{{ nodejs_archive_name }}"
+        mode: "0644"
+        checksum: "sha256:https://nodejs.org/dist/v{{ nodejs_version }}/SHASUMS256.txt"
+
+    - name: Install Node.js under opt
+      ansible.builtin.unarchive:
+        src: "/var/tmp/{{ nodejs_archive_name }}"
+        dest: "{{ nodejs_install_root }}"
+        remote_src: true
+        creates: "{{ nodejs_install_dir }}/bin/node"
+
+    - name: Link Node.js commands into the system path
+      ansible.builtin.file:
+        src: "{{ nodejs_install_dir }}/bin/{{ item }}"
+        dest: "/usr/local/bin/{{ item }}"
+        state: link
+        force: true
+      loop:
+        - node
+        - npm
+        - npx
+        - corepack
+
+    - name: Read the installed Node.js version
+      ansible.builtin.command:
+        cmd: /usr/local/bin/node --version
+      register: installed_nodejs
+      changed_when: false
+
+    - name: Require the selected Node.js version
+      ansible.builtin.assert:
+        that:
+          - installed_nodejs.stdout | trim == 'v' ~ nodejs_version
+        fail_msg: "Node.js installation validation failed: {{ installed_nodejs.stdout }}"
+
+    - name: Print the Controller runtime summary
+      ansible.builtin.debug:
+        msg:
+          - "Controller: {{ inventory_hostname }}"
+          - "Node.js: {{ installed_nodejs.stdout }}"
+          - "Project: {{ project_root }}"
+          - "Workers in parent inventory: {{ groups['workers'] | default([]) | length }}"
+
+    - name: Check the Controller kubeconfig
+      ansible.builtin.stat:
+        path: "{{ controller_kubeconfig }}"
+      register: controller_kubeconfig_file
+
+    - name: Require Kubernetes access and three Workers
+      ansible.builtin.assert:
+        that:
+          - controller_kubeconfig_file.stat.exists
+          - (groups['workers'] | default([]) | length) >= 3
+        fail_msg: >-
+          The Controller kubeconfig or the parent inventory [workers] group is missing.
+          Run from {{ project_root }} and check ansible/cluster/inventory.ini.
+
+    - name: Read the Podman version
+      ansible.builtin.command:
+        cmd: podman --version
+      register: podman_version
+      changed_when: false
+
+    - name: Verify the pinned Kubernetes collection
+      ansible.builtin.command:
+        argv:
+          - "{{ controller_venv }}/bin/ansible-galaxy"
+          - collection
+          - list
+          - kubernetes.core
+      register: kubernetes_collection
+      changed_when: false
+
+    - name: Require the pinned Kubernetes collection version
+      ansible.builtin.assert:
+        that:
+          - kubernetes_core_version in kubernetes_collection.stdout
+        fail_msg: "kubernetes.core {{ kubernetes_core_version }} is not installed."
+
+    - name: Verify Kubernetes API access
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - get
+          - nodes
+      changed_when: false
+
+    - name: Print image build readiness
+      ansible.builtin.debug:
+        msg: "{{ podman_version.stdout }} is ready on the Ansible Controller."

@@ -1,0 +1,42 @@
+{% for storage in storage_partitions %}
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ticketing-local-{{ storage.name }}
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain
+{% endfor %}
+
+{% for storage in storage_partitions %}
+{% for worker in groups['data_workers'] %}
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: local-pv-{{ storage.name }}-{{ storage_k8s_node_map[worker] }}
+  labels:
+    ticketing.io/storage: data
+    ticketing.io/service: {{ storage.name }}
+    ticketing.io/node: "{{ storage_k8s_node_map[worker] }}"
+spec:
+  capacity:
+    storage: {{ storage.capacity }}
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ticketing-local-{{ storage.name }}
+  local:
+    path: {{ storage.mount_path }}
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - "{{ storage_k8s_node_map[worker] }}"
+{% endfor %}
+{% endfor %}

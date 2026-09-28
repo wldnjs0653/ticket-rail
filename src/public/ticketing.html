@@ -1,0 +1,1664 @@
+<!DOCTYPE html>
+<!-- @author gyustar -->
+<!-- @date 2026-09-16 (v8 : 개발자·시연 도구 접이식 분리, 노선도 확대, 날짜 폭 축소) -->
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>열차 예매 시스템</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --navy: #0b2545;
+      --navy-deep: #06182f;
+      --navy-line: #23446f;
+      --navy-mist: #8fa7c7;
+      --ink: #14202f;
+      --ink-soft: #55606f;
+      --ink-faint: #949eab;
+      --line: #e2e6ec;
+      --line-strong: #c9d0d9;
+      --bg: #f1f4f8;
+      --card: #ffffff;
+      --amber: #f0a500;
+      --amber-ink: #33240a;
+      --blue: #1b4dc4;
+      --blue-soft: #edf2fd;
+      --green: #12762f;
+      --green-soft: #e8f5ec;
+      --warn: #a8500a;
+      --warn-soft: #fdf2e5;
+      --red: #b52222;
+      --red-soft: #fcebea;
+      --gold: #8f5a08;
+      --gold-soft: #fcf4dc;
+    }
+    body {
+      font-family: -apple-system, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+      background: var(--bg); color: var(--ink); min-height: 100vh;
+      font-feature-settings: 'tnum' 1;
+      -webkit-font-smoothing: antialiased;
+    }
+    :focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; animation: none !important; }
+    }
+
+    /* ── 전광판 : 타이틀 + 검색 ──────────────────────────────── */
+    .hero {
+      background: var(--navy); color: #fff; padding: 0 16px 34px;
+      position: relative; overflow: hidden;
+    }
+    .hero-train {
+      position: absolute; right: -40px; bottom: -30px;
+      width: 420px; opacity: 0.055; pointer-events: none;
+      fill: #ffffff;
+    }
+    .hero-inner { max-width: 900px; margin: 0 auto; position: relative; }
+    .hero-top { display: flex; justify-content: space-between; align-items: center; padding: 18px 0 24px; }
+    .brand { display: flex; align-items: baseline; gap: 10px; }
+    .brand .mark { font-size: 17px; font-weight: 800; letter-spacing: 4px; color: #fff; }
+    .brand .sub { font-size: 11px; color: var(--navy-mist); letter-spacing: 1px; }
+    .health { display: flex; gap: 7px; align-items: center; }
+    .health-dot { width: 7px; height: 7px; border-radius: 50%; }
+    .health-dot.ok { background: #4ade80; box-shadow: 0 0 0 3px rgba(74,222,128,0.18); }
+    .health-dot.fail { background: #f87171; box-shadow: 0 0 0 3px rgba(248,113,113,0.18); }
+    .health-dot.unknown { background: #7f93b3; }
+    .health-label { font-size: 12px; color: var(--navy-mist); letter-spacing: 0.5px; }
+
+    .board { padding: 8px 0 0; }
+    .station-row { display: flex; align-items: flex-end; justify-content: center; gap: 14px; }
+    .station-input { flex: 0 1 210px; min-width: 0; }
+    .station-input label {
+      display: block; text-align: center; font-size: 11px; font-weight: 600;
+      color: var(--navy-mist); letter-spacing: 3px; margin-bottom: 2px;
+    }
+    .station-input select {
+      width: 100%; border: none; background: transparent; outline: none;
+      color: #fff; font-size: 42px; font-weight: 800; letter-spacing: -0.5px;
+      padding: 0 0 10px; cursor: pointer;
+      appearance: none; -webkit-appearance: none;
+      text-align: center; text-align-last: center;
+      border-bottom: 2px solid var(--navy-line); transition: border-color 0.18s;
+    }
+    .station-input select:hover,
+    .station-input select:focus { border-bottom-color: var(--amber); }
+    .station-input select option { color: var(--ink); background: #fff; font-size: 16px; text-align: left; }
+    .swap-btn {
+      width: 40px; height: 40px; border-radius: 50%;
+      border: 1px solid var(--navy-line); background: transparent;
+      cursor: pointer; font-size: 16px; color: var(--navy-mist);
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 14px; transition: all 0.2s; flex-shrink: 0;
+    }
+    .swap-btn:hover { border-color: var(--amber); color: var(--amber); transform: rotate(180deg); }
+
+    /* 선로 — 검색 영역과 조회 조건 사이를 잇는 구조선 */
+    .rail { display: flex; align-items: center; gap: 0; margin: 20px 0 22px; }
+    .rail-line { flex: 1; height: 1px; background: var(--navy-line); }
+    .rail-ties {
+      flex: 0 0 auto; height: 7px; width: 120px;
+      background-image: repeating-linear-gradient(90deg, var(--navy-line) 0 1px, transparent 1px 9px);
+    }
+
+    .board-controls { display: flex; justify-content: center; gap: 10px; }
+    .board-controls input, .board-controls select {
+      padding: 13px 14px; border: 1px solid var(--navy-line); border-radius: 8px;
+      font-size: 14px; font-weight: 600; color: #fff;
+      background: rgba(255,255,255,0.04); outline: none; color-scheme: dark;
+      transition: border-color 0.18s;
+    }
+    .board-controls input { flex: 0 0 190px; }
+    .board-controls input:focus, .board-controls select:focus { border-color: var(--amber); }
+    .search-btn {
+      flex: 0 0 150px; padding: 13px; background: var(--amber); color: var(--amber-ink);
+      border: none; border-radius: 8px; font-size: 15px; font-weight: 800; letter-spacing: 1px;
+      cursor: pointer; transition: filter 0.15s;
+    }
+    .search-btn:hover { filter: brightness(1.08); }
+
+    /* ── 본문 2단 ────────────────────────────────────────────── */
+    .layout { display: flex; gap: 22px; max-width: 900px; margin: 0 auto; padding: 24px 16px; align-items: flex-start; }
+    .side { width: 284px; flex-shrink: 0; position: sticky; top: 16px; }
+    .container { flex: 1; min-width: 0; }
+    @media (max-width: 840px) {
+      .layout { flex-direction: column; align-items: stretch; }
+      .side { width: 100%; position: static; }
+      .station-input select { font-size: 30px; }
+      .station-input { flex: 1 1 0; }
+      .search-btn { flex: 1; }
+      .hero-train { width: 260px; opacity: 0.04; }
+    }
+
+    /* ── 안내 배너 ───────────────────────────────────────────── */
+    .banner {
+      display: none; align-items: flex-start; gap: 10px;
+      border-radius: 8px; padding: 12px 14px; margin-bottom: 14px;
+      font-size: 13px; font-weight: 600; line-height: 1.55;
+      border-left: 3px solid transparent;
+    }
+    .banner.show { display: flex; }
+    .banner.info    { background: var(--blue-soft);  color: #14307d;      border-left-color: var(--blue); }
+    .banner.success { background: var(--green-soft); color: var(--green); border-left-color: var(--green); }
+    .banner.warn    { background: var(--warn-soft);  color: var(--warn);  border-left-color: var(--amber); }
+    .banner.error   { background: var(--red-soft);   color: var(--red);   border-left-color: var(--red); }
+    .banner .b-close { margin-left: auto; background: none; border: none; cursor: pointer; color: inherit; font-size: 14px; opacity: 0.55; }
+    .banner .b-close:hover { opacity: 1; }
+
+    /* ── 열차 목록 ───────────────────────────────────────────── */
+    .search-summary {
+      font-size: 12px; color: var(--ink-soft); margin: 0 2px 12px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .search-summary b { font-weight: 700; color: var(--ink); }
+    .train-list {
+      background: var(--card); border: 1px solid var(--line);
+      border-radius: 12px; overflow: hidden; margin-bottom: 16px;
+    }
+    .train-item {
+      padding: 18px 20px; cursor: pointer;
+      border-bottom: 1px solid var(--line);
+      border-left: 3px solid transparent;
+      transition: background 0.12s, border-left-color 0.12s;
+    }
+    .train-item:last-child { border-bottom: none; }
+    .train-item:hover { background: #f7fafd; }
+    .train-item.selected { background: var(--blue-soft); border-left-color: var(--navy); }
+    .train-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .train-name { font-size: 14px; font-weight: 800; color: var(--navy); letter-spacing: -0.2px; }
+    .train-badge { font-size: 10px; padding: 4px 9px; border-radius: 4px; font-weight: 800; letter-spacing: 0.5px; color: #fff; }
+    .train-badge.ktx { background: #1b4dc4; }
+    .train-badge.itx { background: #0f8a4a; }
+    .train-badge.mugunghwa { background: #c2185b; }
+    .train-badge.etc { background: #6b7684; }
+
+    .train-time-row { display: flex; align-items: center; gap: 14px; }
+    .train-time { text-align: center; min-width: 62px; }
+    .train-time .time { font-size: 26px; font-weight: 800; letter-spacing: -1px; line-height: 1; }
+    .train-time .station { font-size: 11px; color: var(--ink-faint); margin-top: 4px; }
+    .train-duration { flex: 1; position: relative; }
+    .train-duration .track {
+      height: 6px; position: relative;
+      background-image: repeating-linear-gradient(90deg, var(--line-strong) 0 1px, transparent 1px 7px);
+    }
+    .train-duration .track::before,
+    .train-duration .track::after {
+      content: ''; position: absolute; top: 1px; width: 5px; height: 5px;
+      border-radius: 50%; background: var(--navy);
+    }
+    .train-duration .track::before { left: 0; }
+    .train-duration .track::after { right: 0; }
+    .train-duration .dur-text { margin-top: 8px; text-align: center; }
+    .train-duration .dur-text span {
+      display: inline-block; font-size: 11px; color: var(--ink-soft);
+      background: #f0f2f5; border-radius: 4px; padding: 3px 9px;
+    }
+
+    .train-bottom {
+      display: flex; justify-content: space-between; align-items: flex-end;
+      margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line);
+    }
+    .fare { display: flex; flex-direction: column; gap: 5px; }
+    .fare-row { display: flex; align-items: baseline; gap: 10px; font-size: 13px; }
+    .fare-row .cls { color: var(--ink-soft); min-width: 30px; }
+    .fare-row .amt { font-weight: 800; font-size: 16px; letter-spacing: -0.3px; }
+    .fare-row .amt.none { font-weight: 600; font-size: 13px; color: var(--ink-faint); }
+    .fare-row.first .amt { color: var(--gold); }
+    .seat-remain { font-size: 12px; font-weight: 700; }
+    .seat-remain.wide { color: var(--green); }
+    .seat-remain.mid  { color: var(--blue); }
+    .seat-remain.few  { color: var(--red); }
+    .seat-remain small { color: var(--ink-faint); font-weight: 400; }
+
+    /* ── 카드 공통 ───────────────────────────────────────────── */
+    .seat-select-card, .result-card, .panel {
+      background: var(--card); border: 1px solid var(--line);
+      border-radius: 12px; padding: 22px; margin-bottom: 16px;
+    }
+
+    /* ── 좌석 선택 ───────────────────────────────────────────── */
+    .seat-select-card { display: none; }
+    .seat-select-card h3 { font-size: 15px; font-weight: 800; margin-bottom: 4px; letter-spacing: -0.2px; }
+    .seat-hint { font-size: 12px; color: var(--ink-faint); margin-bottom: 16px; }
+    .seat-legend { display: flex; gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }
+    .seat-legend .lg { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-soft); }
+    .seat-legend .sq { width: 13px; height: 13px; border-radius: 3px; border: 1px solid transparent; }
+    .sq.avail { background: #eef0f3; border-color: var(--line-strong); }
+    .sq.prem  { background: var(--gold-soft); border-color: #ddc172; }
+    .sq.sel   { background: var(--navy); }
+    .sq.taken { background: #f7f8fa; border-color: var(--line); }
+
+    /* 객차 외곽 — 좌석 배열을 차량 안에 넣은 것처럼 */
+    .car-shell {
+      border: 1px solid var(--line-strong); border-radius: 14px;
+      padding: 14px 12px; margin-bottom: 14px; background: #fbfcfd;
+    }
+    .seat-layout { display: flex; flex-direction: column; gap: 5px; }
+    .tseat {
+      height: 34px; border-radius: 5px; border: 1px solid var(--line-strong);
+      cursor: pointer; font-size: 11px; font-weight: 700; transition: all 0.12s;
+      background: #eef0f3; color: var(--ink-soft);
+    }
+    .tseat.avail:hover { background: var(--navy); border-color: var(--navy); color: #fff; }
+    .tseat.prem { background: var(--gold-soft); border-color: #ddc172; color: var(--gold); }
+    .tseat.prem:hover { background: var(--gold); border-color: var(--gold); color: #fff; }
+    .tseat.sel { background: var(--navy); border-color: var(--navy); color: #fff; }
+    .tseat.taken { background: #f7f8fa; border-color: var(--line); color: var(--line-strong); cursor: not-allowed; }
+
+    .sel-seat-info {
+      font-size: 13px; font-weight: 700; color: #14307d;
+      background: var(--blue-soft); border-radius: 6px; padding: 11px 13px; margin-bottom: 12px;
+      display: none;
+    }
+    .sel-seat-info.show { display: block; }
+
+    .action-bar { display: flex; gap: 8px; }
+    .action-bar .btn {
+      flex: 1; padding: 13px; border: none; border-radius: 8px;
+      font-size: 14px; font-weight: 700; cursor: pointer; transition: filter 0.15s;
+    }
+    .action-bar .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .action-bar .btn:hover:not(:disabled) { filter: brightness(0.94); }
+    .btn-hold { background: var(--amber); color: var(--amber-ink); }
+    .btn-book { background: var(--green); color: #fff; }
+    .btn-cancel { background: #eef0f3; color: var(--ink-soft); }
+    .btn-stress { background: #fff; color: var(--navy); border: 1.5px solid var(--navy) !important; }
+
+    /* ── 동시 선점 결과 — 이 화면의 주인공 ───────────────────── */
+    .stress-panel {
+      display: none; border-radius: 12px; overflow: hidden; margin-bottom: 14px;
+      background: var(--navy-deep);
+    }
+    .stress-panel.show { display: block; }
+    .stress-head {
+      color: var(--navy-mist); font-size: 11px; font-weight: 700; letter-spacing: 2px;
+      padding: 12px 16px 0;
+    }
+    .stress-body { padding: 4px 16px 20px; }
+    .stress-nums { display: flex; align-items: baseline; justify-content: center; gap: 8px; margin: 12px 0 14px; }
+    .stress-nums .n { text-align: center; padding: 0 14px; }
+    .stress-nums .n .v { font-size: 56px; font-weight: 800; line-height: 1; letter-spacing: -2px; }
+    .stress-nums .n .k { font-size: 11px; font-weight: 600; margin-top: 8px; letter-spacing: 1px; }
+    .stress-nums .ok .v { color: #5ee08e; }
+    .stress-nums .ok .k { color: #7fc39b; }
+    .stress-nums .conflict .v { color: #ff7a7a; }
+    .stress-nums .conflict .k { color: #d79a9a; }
+    .stress-nums .slash { font-size: 30px; color: var(--navy-line); font-weight: 200; }
+    .stress-desc { font-size: 12px; color: #93a9c9; text-align: center; line-height: 1.7; max-width: 44ch; margin: 0 auto; }
+
+    /* ── 결과 티켓 ───────────────────────────────────────────── */
+    .result-card { display: none; padding: 0; border: none; background: none; }
+    .ticket {
+      background: #fff; border: 1px solid var(--line-strong);
+      border-radius: 10px; overflow: hidden; margin-bottom: 14px;
+    }
+    .ticket-top { padding: 20px 22px 18px; }
+    .ticket-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+    .ticket-header .type { font-size: 14px; font-weight: 800; color: var(--navy); }
+    .ticket-status { padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: 700; }
+    .ticket-status.pending { background: var(--warn-soft); color: var(--warn); }
+    .ticket-status.confirmed { background: var(--green-soft); color: var(--green); }
+    .ticket-status.failed { background: var(--red-soft); color: var(--red); }
+    .ticket-route { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+    .ticket-route .st { text-align: center; min-width: 66px; }
+    .ticket-route .st .city { font-size: 24px; font-weight: 800; letter-spacing: -0.5px; }
+    .ticket-route .st .tm { font-size: 13px; color: var(--ink-soft); margin-top: 4px; }
+    .ticket-route .mid { flex: 1; }
+    .ticket-route .mid .track {
+      height: 6px; position: relative;
+      background-image: repeating-linear-gradient(90deg, var(--line-strong) 0 1px, transparent 1px 7px);
+    }
+    .ticket-details { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    .ticket-details div { text-align: center; }
+    .ticket-details label { font-size: 11px; color: var(--ink-faint); }
+    .ticket-details p { font-size: 14px; font-weight: 700; margin-top: 4px; }
+
+    /* 절취선 — 표를 뜯는 자리 */
+    .perf { position: relative; height: 18px; background: #fff; }
+    .perf::before, .perf::after {
+      content: ''; position: absolute; top: 50%; transform: translateY(-50%);
+      width: 18px; height: 18px; border-radius: 50%; background: var(--bg);
+      border: 1px solid var(--line-strong);
+    }
+    .perf::before { left: -10px; }
+    .perf::after { right: -10px; }
+    .perf .dash {
+      position: absolute; left: 16px; right: 16px; top: 50%;
+      border-top: 1px dashed var(--line-strong);
+    }
+    .ticket-foot { padding: 4px 22px 20px; text-align: center; }
+    .ticket-foot .bk-label { font-size: 11px; color: var(--ink-faint); }
+    .ticket-foot .bk-id { font-size: 22px; font-weight: 800; letter-spacing: 3px; color: var(--navy); margin-top: 4px; }
+    .ticket-foot .pay-line { font-size: 12px; font-weight: 600; color: var(--ink-soft); margin-top: 10px; }
+
+    /* ── 좌측 : 노선도 ───────────────────────────────────────── */
+    .panel { padding: 24px; }
+    .panel h4 { font-size: 12px; font-weight: 700; color: var(--ink-soft); margin-bottom: 22px; letter-spacing: 2px; }
+    .flow-steps { display: flex; flex-direction: column; }
+    .step { display: flex; gap: 18px; padding: 15px 0; position: relative; }
+    .step .num {
+      width: 18px; height: 18px; border-radius: 50%;
+      background: #fff; border: 3px solid var(--line-strong);
+      flex-shrink: 0; margin-top: 3px; transition: all 0.2s; font-size: 0;
+    }
+    .step .body { flex: 1; min-width: 0; }
+    .step .label { font-size: 16px; font-weight: 700; color: var(--ink-faint); transition: color 0.2s; }
+    .step .api { font-size: 12px; color: var(--line-strong); font-family: ui-monospace, 'Cascadia Code', monospace; margin-top: 5px; word-break: break-all; line-height: 1.6; }
+    .step:not(:last-child)::before {
+      content: ''; position: absolute; left: 7.5px; top: 36px; width: 3px;
+      height: calc(100% - 24px); background: var(--line); border-radius: 2px;
+    }
+    .step.active .num { border-color: var(--navy); background: var(--amber); box-shadow: 0 0 0 4px rgba(240,165,0,0.22); }
+    .step.active .label { color: var(--navy); }
+    .step.active .api { color: var(--ink-soft); }
+    .step.done .num { border-color: var(--navy); background: var(--navy); }
+    .step.done .label { color: var(--ink); }
+    .step.done .api { color: var(--ink-faint); }
+    .step.done::before { background: var(--navy); }
+
+    /* ── 실시간 지표 ─────────────────────────────────────────── */
+    .metric-row { display: flex; justify-content: space-between; align-items: baseline; padding: 8px 0; border-bottom: 1px solid var(--line); }
+    .metric-row:last-of-type { border-bottom: none; }
+    .metric-row .k { font-size: 13px; color: var(--ink-soft); }
+    .metric-row .v { font-size: 18px; font-weight: 800; color: var(--ink); letter-spacing: -0.5px; }
+    .metric-row .v.ok { color: var(--green); }
+    .metric-row .v.warn { color: var(--red); }
+    .metric-note { font-size: 11px; color: var(--ink-faint); margin-top: 12px; line-height: 1.65; }
+
+    /* ── 로그 ────────────────────────────────────────────────── */
+    .log-card { background: var(--navy-deep); border-radius: 12px; padding: 18px; margin-bottom: 0; }
+    .log-card h3 { font-size: 11px; color: #62789c; margin-bottom: 12px; font-weight: 700; letter-spacing: 2px; }
+
+    /* ── 개발자·시연 도구 (접이식) ───────────────────────────── */
+    /* 관리자 관점의 검증 도구를 하단에 접이식으로 모은다.
+       사용자 예매 흐름과 시연·모니터링을 시각적으로 분리하되,
+       계정·권한 없이 한 화면에서 펼침/접힘으로 나눈다. */
+    .devtools { max-width: 900px; margin: 8px auto 24px; padding: 0 16px; }
+    .devtools-toggle {
+      width: 100%; display: flex; align-items: center; gap: 10px;
+      background: var(--navy); color: #fff; border: none; border-radius: 12px;
+      padding: 16px 20px; font-size: 14px; font-weight: 700; letter-spacing: 0.5px;
+      cursor: pointer; transition: filter 0.15s;
+    }
+    .devtools-toggle:hover { filter: brightness(1.1); }
+    .devtools-toggle .caret { transition: transform 0.2s; font-size: 12px; color: var(--navy-mist); }
+    .devtools-toggle.open .caret { transform: rotate(90deg); }
+    .devtools-toggle .sub { font-size: 11px; font-weight: 500; color: var(--navy-mist); margin-left: auto; }
+    .devtools-body { display: none; padding-top: 14px; }
+    .devtools-body.show { display: block; }
+    .devtools-grid { display: flex; gap: 14px; align-items: flex-start; }
+    .devtools-grid > * { flex: 1; min-width: 0; }
+    @media (max-width: 720px) { .devtools-grid { flex-direction: column; } }
+
+    /* 시연 영역 안 지표 패널 */
+    .dev-metric-card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+    .dev-metric-card h4 { font-size: 11px; font-weight: 700; color: var(--ink-soft); margin-bottom: 14px; letter-spacing: 2px; }
+    /* 시연 영역 안 동시선점 버튼 */
+    .dev-stress-bar { margin-top: 14px; }
+    .dev-stress-bar .btn-stress {
+      width: 100%; padding: 14px; border-radius: 10px; font-size: 14px; font-weight: 700;
+      background: #fff; color: var(--navy); border: 1.5px solid var(--navy); cursor: pointer;
+      transition: filter 0.15s;
+    }
+    .dev-stress-bar .btn-stress:disabled { opacity: 0.4; cursor: not-allowed; }
+    .dev-stress-bar .btn-stress:hover:not(:disabled) { background: var(--navy); color: #fff; }
+    .dev-stress-hint { font-size: 12px; color: var(--ink-faint); margin-top: 8px; text-align: center; }
+    .log-scroll { max-height: 190px; overflow-y: auto; font-family: ui-monospace, 'Cascadia Code', 'Fira Code', monospace; font-size: 11px; line-height: 1.9; }
+    .log-entry { color: #8fa3c2; padding: 1px 0; }
+    .log-entry .m { font-weight: 700; }
+    .log-entry .m.get { color: #5ee08e; }
+    .log-entry .m.post { color: #f5c451; }
+    .log-entry .s { font-weight: 700; }
+    .log-entry .s.ok { color: #5ee08e; }
+    .log-entry .s.err { color: #ff7a7a; }
+
+    .no-route {
+      background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+      padding: 44px 20px; text-align: center; color: var(--ink-soft); font-size: 14px;
+      margin-bottom: 16px;
+    }
+
+    /*
+     * [추가] 결제·예매 진행 화면 스타일
+     * 설명: 결제수단 선택 모달, Kafka 비동기 처리 대기 화면,
+     *       예매 완료 모달과 우측 상단 완료 알림의 스타일을 정의한다.
+     */
+    /* ── 사용자 결제 팝업 ───────────────────────────────────── */
+    .modal-backdrop {
+      position: fixed; inset: 0; z-index: 1000; display: none;
+      align-items: center; justify-content: center; padding: 20px;
+      background: rgba(4, 16, 34, 0.66); backdrop-filter: blur(3px);
+    }
+    .modal-backdrop.show { display: flex; animation: fadeIn 0.18s ease-out; }
+    .payment-dialog {
+      width: min(520px, 100%); max-height: calc(100vh - 40px); overflow-y: auto;
+      background: #fff; border-radius: 18px; box-shadow: 0 24px 70px rgba(3,18,40,0.3);
+      animation: riseIn 0.22s ease-out;
+    }
+    .payment-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 22px 24px 18px; border-bottom: 1px solid var(--line);
+    }
+    .payment-head h2 { font-size: 20px; color: var(--navy); }
+    .payment-head p { margin-top: 5px; font-size: 12px; color: var(--ink-soft); }
+    .modal-close {
+      border: 0; background: #f2f4f7; color: var(--ink-soft); width: 34px; height: 34px;
+      border-radius: 50%; cursor: pointer; font-size: 16px;
+    }
+    .payment-body { padding: 22px 24px 24px; }
+    .payment-summary {
+      display: grid; grid-template-columns: 1fr auto; gap: 9px 18px;
+      padding: 16px 18px; border-radius: 12px; background: #f5f7fa; margin-bottom: 22px;
+    }
+    .payment-summary .route { font-size: 15px; font-weight: 800; color: var(--navy); }
+    .payment-summary .seat { font-size: 12px; color: var(--ink-soft); }
+    .payment-summary .amount {
+      grid-row: 1 / 3; grid-column: 2; align-self: center;
+      font-size: 21px; font-weight: 800; color: var(--navy);
+    }
+    .pay-section-title { font-size: 13px; font-weight: 800; margin-bottom: 10px; }
+    .payment-methods { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
+    .pay-method { position: relative; cursor: pointer; }
+    .pay-method input { position: absolute; opacity: 0; pointer-events: none; }
+    .pay-method span {
+      min-height: 72px; display: flex; flex-direction: column; gap: 7px;
+      align-items: center; justify-content: center; border: 1px solid var(--line-strong);
+      border-radius: 11px; font-size: 12px; font-weight: 700; color: var(--ink-soft);
+      transition: all 0.16s;
+    }
+    .pay-method .pay-icon { font-size: 21px; line-height: 1; }
+    .pay-method input:checked + span {
+      border: 2px solid var(--navy); color: var(--navy); background: #f1f5fb;
+      box-shadow: 0 0 0 3px rgba(11,37,69,0.08);
+    }
+    .card-options { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin: 14px 0 18px; }
+    .card-options select {
+      width: 100%; border: 1px solid var(--line-strong); border-radius: 9px;
+      padding: 12px 11px; background: #fff; color: var(--ink); font-size: 13px;
+    }
+    .payment-agree {
+      display: flex; align-items: flex-start; gap: 9px; padding: 13px 0 18px;
+      border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-soft); line-height: 1.55;
+    }
+    .payment-agree input { margin-top: 2px; accent-color: var(--navy); }
+    .pay-submit {
+      width: 100%; border: 0; border-radius: 10px; padding: 15px 18px;
+      background: var(--navy); color: #fff; font-size: 15px; font-weight: 800; cursor: pointer;
+    }
+    .pay-submit:hover { background: #123a69; }
+    .pay-error { min-height: 20px; color: var(--red); font-size: 12px; margin-top: 9px; text-align: center; }
+    .payment-processing { display: none; padding: 48px 28px 44px; text-align: center; }
+    .payment-processing.show { display: block; }
+    .pay-spinner {
+      width: 58px; height: 58px; margin: 0 auto 22px; border-radius: 50%;
+      border: 5px solid #e4e9ef; border-top-color: var(--navy); animation: spin 0.8s linear infinite;
+    }
+    .payment-processing h3 { color: var(--navy); font-size: 19px; }
+    .payment-processing p { color: var(--ink-soft); font-size: 13px; margin-top: 9px; line-height: 1.65; }
+    .process-steps { display: flex; justify-content: center; gap: 8px; margin-top: 24px; }
+    .process-dot { width: 8px; height: 8px; background: #d7dde6; border-radius: 50%; }
+    .process-dot.on { background: var(--green); box-shadow: 0 0 0 4px rgba(18,118,47,0.12); }
+
+    .complete-dialog {
+      width: min(470px, 100%); background: #fff; border-radius: 18px;
+      padding: 34px 28px 28px; text-align: center; box-shadow: 0 24px 70px rgba(3,18,40,0.3);
+    }
+    .complete-check {
+      width: 66px; height: 66px; border-radius: 50%; margin: 0 auto 18px;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--green-soft); color: var(--green); font-size: 34px; font-weight: 800;
+    }
+    .complete-dialog h2 { font-size: 22px; color: var(--navy); }
+    .complete-dialog > p { margin: 8px 0 20px; color: var(--ink-soft); font-size: 13px; }
+    .complete-details {
+      background: #f5f7fa; border-radius: 12px; padding: 15px 17px;
+      text-align: left; margin-bottom: 20px;
+    }
+    .complete-row { display: flex; justify-content: space-between; gap: 18px; padding: 6px 0; font-size: 13px; }
+    .complete-row span { color: var(--ink-soft); }
+    .complete-row strong { color: var(--ink); text-align: right; }
+
+    .payment-toast {
+      position: fixed; z-index: 1200; top: 22px; right: 22px;
+      width: min(360px, calc(100% - 32px)); display: flex; gap: 12px; align-items: flex-start;
+      padding: 15px 17px; border-radius: 12px; background: #fff;
+      border-left: 5px solid var(--green); box-shadow: 0 14px 42px rgba(3,18,40,0.22);
+      transform: translateX(calc(100% + 40px)); opacity: 0;
+      transition: transform 0.28s ease, opacity 0.28s ease;
+    }
+    .payment-toast.show { transform: translateX(0); opacity: 1; }
+    .payment-toast .ico { color: var(--green); font-size: 20px; font-weight: 800; }
+    .payment-toast strong { display: block; color: var(--navy); font-size: 14px; }
+    .payment-toast p { margin-top: 4px; color: var(--ink-soft); font-size: 12px; line-height: 1.5; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes riseIn {
+      from { opacity: 0; transform: translateY(12px) scale(0.98); }
+      to { opacity: 1; transform: none; }
+    }
+    @media (max-width: 560px) {
+      .payment-methods { grid-template-columns: 1fr; }
+      .pay-method span { min-height: 52px; flex-direction: row; }
+      .card-options { grid-template-columns: 1fr; }
+      .payment-toast { right: 16px; top: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="hero">
+    <svg class="hero-train" viewBox="0 0 800 420" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <path d="M18 404c-6 0-9-6-5-10L206 190c34-38 83-60 134-60h240c62 0 112 50 112 112v104c0 34-28 62-62 62H18z"/>
+      <path d="M534 176h72c34 0 62 28 62 62v22c0 8-7 15-15 15h-119c-8 0-15-7-15-15v-69c0-8 7-15 15-15z" fill="#0b2545"/>
+      <path d="M300 210l-70 78c-4 5 0 12 6 12h96c8 0 15-7 15-15v-70c0-11-14-15-21-7z" fill="#0b2545"/>
+      <path d="M196 244l-44 48c-4 5-1 12 6 12h50c8 0 15-7 15-15v-40c0-10-13-14-20-7z" fill="#0b2545"/>
+      <path d="M140 296l-24 26c-4 5-1 12 6 12h26c8 0 14-6 14-14v-19c0-9-12-12-18-6z" fill="#0b2545"/>
+      <circle cx="560" cy="360" r="17" fill="#0b2545"/>
+      <circle cx="638" cy="360" r="17" fill="#0b2545"/>
+      <path d="M120 322L392 216" stroke="#0b2545" stroke-width="14" stroke-linecap="round" fill="none"/>
+    </svg>
+
+    <div class="hero-inner">
+      <div class="hero-top">
+        <div class="brand">
+          <span class="mark">열차 예매</span>
+          <span class="sub">Kubernetes 기반 티켓팅 시연</span>
+        </div>
+        <div class="health">
+          <div class="health-dot unknown" id="healthDot"></div>
+          <span class="health-label" id="healthLabel">연결 확인 중</span>
+        </div>
+      </div>
+
+      <div class="board">
+        <div class="station-row">
+          <div class="station-input">
+            <label>출발</label>
+            <select id="fromStation" aria-label="출발역">
+              <option value="서울" selected>서울</option>
+              <option value="부산">부산</option>
+              <option value="대전">대전</option>
+              <option value="대구">대구</option>
+              <option value="광주">광주</option>
+              <option value="전주">전주</option>
+              <option value="강릉">강릉</option>
+            </select>
+          </div>
+          <button class="swap-btn" onclick="swapStations()" aria-label="출발·도착 바꾸기">⇄</button>
+          <div class="station-input to">
+            <label>도착</label>
+            <select id="toStation" aria-label="도착역">
+              <option value="서울">서울</option>
+              <option value="부산" selected>부산</option>
+              <option value="대전">대전</option>
+              <option value="대구">대구</option>
+              <option value="광주">광주</option>
+              <option value="전주">전주</option>
+              <option value="강릉">강릉</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="rail">
+          <div class="rail-line"></div>
+          <div class="rail-ties"></div>
+          <div class="rail-line"></div>
+        </div>
+
+        <div class="board-controls">
+          <input type="date" id="tripDate" value="2026-12-31" aria-label="출발일">
+          <select id="paxCount" aria-label="인원">
+            <option value="1">1명</option>
+            <option value="2">2명</option>
+            <option value="3">3명</option>
+            <option value="4">4명</option>
+          </select>
+          <button class="search-btn" onclick="searchTrains()">열차 조회</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="layout">
+    <aside class="side">
+      <div class="panel">
+        <h4>진행 단계</h4>
+        <div class="flow-steps" id="flowSteps">
+          <div class="step active" data-step="1">
+            <div class="num"></div>
+            <div class="body">
+              <div class="label">열차 조회</div>
+              <div class="api">GET /events</div>
+            </div>
+          </div>
+          <div class="step" data-step="2">
+            <div class="num"></div>
+            <div class="body">
+              <div class="label">대기열 · 입장 인증</div>
+              <div class="api">POST /queue/join<br>POST /auth/verify</div>
+            </div>
+          </div>
+          <div class="step" data-step="3">
+            <div class="num"></div>
+            <div class="body">
+              <div class="label">좌석 선택</div>
+              <div class="api">GET /seats/:eventId</div>
+            </div>
+          </div>
+          <div class="step" data-step="4">
+            <div class="num"></div>
+            <div class="body">
+              <div class="label">좌석 선점</div>
+              <div class="api">POST /seats/:id/hold</div>
+            </div>
+          </div>
+          <div class="step" data-step="5">
+            <div class="num"></div>
+            <div class="body">
+              <div class="label">예매 확정</div>
+              <div class="api">POST /bookings<br>GET /bookings/:id</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <div class="container">
+      <div class="banner" id="banner">
+        <span id="bannerMsg"></span>
+        <button class="b-close" onclick="hideBanner()" aria-label="닫기">✕</button>
+      </div>
+
+      <div id="trainListSection" style="display:none;">
+        <div class="search-summary" id="searchSummary"></div>
+        <div class="train-list" id="trainList"></div>
+      </div>
+
+      <div class="seat-select-card" id="seatSelectCard">
+        <h3 id="seatSelectTitle">좌석 선택</h3>
+        <p class="seat-hint">좌석을 고르면 선점하거나, 같은 좌석에 동시 요청을 보내볼 수 있습니다.</p>
+        <div class="seat-legend">
+          <span class="lg"><span class="sq avail"></span>일반</span>
+          <span class="lg"><span class="sq prem"></span>특실</span>
+          <span class="lg"><span class="sq sel"></span>선택</span>
+          <span class="lg"><span class="sq taken"></span>선점·판매</span>
+        </div>
+
+        <div class="car-shell">
+          <div class="seat-layout" id="seatLayout"></div>
+        </div>
+
+        <div class="sel-seat-info" id="selSeatInfo"></div>
+
+        <div class="action-bar">
+          <button class="btn btn-cancel" onclick="cancelSeatSelect()">취소</button>
+          <button class="btn btn-hold" id="holdTrainBtn" onclick="holdTrainSeat()" disabled>좌석 선택</button>
+          <button class="btn btn-book" id="bookTrainBtn" onclick="openPaymentModal()" disabled style="display:none;">결제하기</button>
+        </div>
+      </div>
+
+      <div class="result-card" id="resultCard">
+        <div class="ticket" id="ticketVisual"></div>
+        <div class="action-bar">
+          <button class="btn btn-cancel" onclick="resetAll()">새로 조회</button>
+          <button class="btn btn-book" onclick="queryResult()" id="refreshBtn" style="display:none;">상태 갱신</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 개발자·시연 도구 (접이식) — 관리자 관점 검증 도구를 하단에 모은다 -->
+  <div class="devtools">
+    <button class="devtools-toggle" id="devToggle" onclick="toggleDevtools()">
+      <span class="caret">▶</span>
+      <span>개발자 · 시연 도구</span>
+      <span class="sub">동시 선점 시연 · 실시간 지표 · API 로그</span>
+    </button>
+    <div class="devtools-body" id="devBody">
+      <div class="devtools-grid">
+        <!-- 실시간 지표 -->
+        <div class="dev-metric-card">
+          <h4>실시간 지표</h4>
+          <div class="metric-row">
+            <span class="k">예약 확정</span>
+            <span class="v ok" id="mBooking">-</span>
+          </div>
+          <div class="metric-row">
+            <span class="k">좌석 선점 성공</span>
+            <span class="v ok" id="mHoldOk">-</span>
+          </div>
+          <div class="metric-row">
+            <span class="k">선점 경합 실패</span>
+            <span class="v warn" id="mHoldConflict">-</span>
+          </div>
+          <div class="metric-row">
+            <span class="k">좌석 충돌 (예매)</span>
+            <span class="v warn" id="mBookConflict">-</span>
+          </div>
+          <div class="metric-row">
+            <span class="k">처리 중 요청</span>
+            <span class="v" id="mInFlight">-</span>
+          </div>
+          <div class="metric-note">GET /metrics 를 5초 간격으로 조회한 값이다. 동일 지표가 Prometheus·Grafana 로 수집된다.</div>
+
+          <!-- 동시 선점 시연 버튼 -->
+          <div class="dev-stress-bar">
+            <button class="btn-stress" id="stressBtn" onclick="stressSeat()" disabled>동시 5건 시연</button>
+            <div class="dev-stress-hint">좌석 선택 화면에서 좌석을 고른 뒤 눌러주세요.</div>
+          </div>
+
+          <!-- 동시 선점 결과 -->
+          <div class="stress-panel" id="stressPanel" style="margin-top:14px;">
+            <div class="stress-head">동시 선점 요청 결과</div>
+            <div class="stress-body">
+              <div class="stress-nums">
+                <div class="n ok"><div class="v" id="stressOk">-</div><div class="k">선점 성공</div></div>
+                <div class="slash">/</div>
+                <div class="n conflict"><div class="v" id="stressConflict">-</div><div class="k">충돌 409</div></div>
+              </div>
+              <div class="stress-desc" id="stressDesc"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- API 통신 로그 -->
+        <div class="log-card">
+          <h3>API 통신 로그</h3>
+          <div class="log-scroll" id="logPanel">
+            <div class="log-entry">대기 중...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!--
+    [추가] 결제·예매 UI 시작
+    설명:
+    좌석을 선점한 사용자가 결제수단을 선택하고 결제 처리 상태를 확인하는 영역이다.
+    결제가 완료되면 사용자가 선택한 구간·열차·좌석·결제수단·금액·예매번호를 표시한다.
+  -->
+  <div class="modal-backdrop" id="paymentModal" role="dialog" aria-modal="true" aria-labelledby="paymentTitle" aria-hidden="true">
+    <div class="payment-dialog">
+      <div id="paymentFormView">
+        <div class="payment-head">
+          <div><h2 id="paymentTitle">결제하기</h2><p>예약 정보를 확인하고 결제수단을 선택해주세요.</p></div>
+          <button class="modal-close" onclick="closePaymentModal()" aria-label="결제창 닫기">✕</button>
+        </div>
+        <div class="payment-body">
+          <div class="payment-summary">
+            <div class="route" id="payRoute">-</div>
+            <div class="seat" id="paySeat">-</div>
+            <div class="amount" id="payAmount">0원</div>
+          </div>
+          <div class="pay-section-title">결제수단</div>
+          <div class="payment-methods">
+            <label class="pay-method"><input type="radio" name="paymentMethod" value="신용·체크카드" onchange="syncPaymentMethodOptions()" checked><span><b class="pay-icon">▣</b>신용·체크카드</span></label>
+            <label class="pay-method"><input type="radio" name="paymentMethod" value="간편결제" onchange="syncPaymentMethodOptions()"><span><b class="pay-icon">●</b>간편결제</span></label>
+            <label class="pay-method"><input type="radio" name="paymentMethod" value="계좌이체" onchange="syncPaymentMethodOptions()"><span><b class="pay-icon">↔</b>계좌이체</span></label>
+          </div>
+          <div class="card-options">
+            <select id="cardCompany" aria-label="카드사 선택">
+              <option value="">카드사 선택</option><option>국민카드</option><option>신한카드</option><option>삼성카드</option><option>현대카드</option><option>롯데카드</option>
+            </select>
+            <select id="installment" aria-label="할부 선택">
+              <option>일시불</option><option>2개월</option><option>3개월</option><option>6개월</option>
+            </select>
+          </div>
+          <label class="payment-agree"><input type="checkbox" id="paymentAgree"><span>예약 내역과 결제금액을 확인했으며, 결제 진행에 동의합니다.</span></label>
+          <button class="pay-submit" id="paySubmitBtn" onclick="confirmPayment()">결제하기</button>
+          <div class="pay-error" id="payError"></div>
+        </div>
+      </div>
+      <div class="payment-processing" id="paymentProcessingView">
+        <div class="pay-spinner"></div>
+        <h3 id="processingTitle">결제를 처리하고 있습니다</h3>
+        <p id="processingMessage">창을 닫거나 새로고침하지 마세요.<br>결제 승인 결과를 안전하게 확인하고 있습니다.</p>
+        <div class="process-steps"><span class="process-dot on"></span><span class="process-dot" id="paymentDoneDot"></span><span class="process-dot" id="notificationDoneDot"></span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="completionModal" role="dialog" aria-modal="true" aria-labelledby="completionTitle" aria-hidden="true">
+    <div class="complete-dialog">
+      <div class="complete-check">✓</div>
+      <h2 id="completionTitle">결제 및 예매가 완료되었습니다</h2>
+      <p>등록된 알림 채널로 예매 확정 안내를 전송했습니다.</p>
+      <div class="complete-details" id="completionDetails"></div>
+      <button class="pay-submit" onclick="closeCompletionModal()">승차권 확인</button>
+    </div>
+  </div>
+
+  <div class="payment-toast" id="paymentToast" role="status" aria-live="polite">
+    <div class="ico">✓</div><div><strong>예매 확정 알림</strong><p id="paymentToastMessage"></p></div>
+  </div>
+  <!-- [추가] 결제·예매 UI 끝 -->
+
+  <script>
+    // ─────────────────────────────────────────────────────────────
+    // 실제 백엔드 API 연동판 (v8 — 시연 도구를 하단 접이식으로 분리. 관리자 관점 화면)
+    //
+    // 흐름 : 대기열 진입 → 입장 인증 → 좌석 조회 → 좌석 선점 → 예매 확정 → 조회
+    // 백엔드가 admitted 상태가 아니면 hold를 403으로 막으므로,
+    // 열차를 선택하는 시점에 queue/join + auth/verify를 먼저 태운다.
+    //
+    // 로그인 기능은 프로젝트 범위 밖이라 user_id는 app_user에 존재하는
+    // 테스트 계정 id(1)로 고정한다.
+    // ─────────────────────────────────────────────────────────────
+    const API = '';          // 같은 origin에서 정적 파일이 제공되므로 빈 문자열
+    const USER_ID = 1;
+
+    // 개발자·시연 도구 접이식 토글.
+    // 관리자 관점 검증 도구(동시 선점 시연·지표·로그)를 하단에서 펼치고 접는다.
+    function toggleDevtools() {
+      const body = document.getElementById('devBody');
+      const toggle = document.getElementById('devToggle');
+      const opened = body.classList.toggle('show');
+      toggle.classList.toggle('open', opened);
+    }
+    // 시연 도구를 강제로 펼친다(동시 선점 시연 실행 시 결과를 바로 보이게).
+    function openDevtools() {
+      document.getElementById('devBody').classList.add('show');
+      document.getElementById('devToggle').classList.add('open');
+    }
+
+    let trains = [];
+
+    function trainType(title) {
+      if (title.startsWith('KTX')) return 'ktx';
+      if (title.startsWith('ITX')) return 'itx';
+      if (title.startsWith('무궁화')) return 'mugunghwa';
+      return 'etc';
+    }
+
+    // "KTX 101 서울-부산" 형태의 title 을 열차명과 구간으로 나눈다.
+    function parseTitle(title) {
+      const parts = title.trim().split(' ');
+      const route = parts.length > 1 ? parts[parts.length - 1] : '';
+      const name = parts.slice(0, -1).join(' ') || title;
+      const [dep, arr] = route.split('-');
+      return { name, depStation: dep || '', arrStation: arr || '' };
+    }
+
+    function hhmm(iso) {
+      return new Date(iso).toLocaleTimeString('ko-KR', {
+        hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Seoul',
+      });
+    }
+
+    function duration(a, b) {
+      const min = Math.round((new Date(b) - new Date(a)) / 60000);
+      const h = Math.floor(min / 60);
+      const m = min % 60;
+      return h > 0 ? `${h}시간 ${m}분` : `${m}분`;
+    }
+
+    // GET /events 응답을 화면이 쓰는 형태로 변환한다.
+    // title 의 구간("서울-광주" 등)을 파싱해 depStation/arrStation 으로 보관하고,
+    // 조회 시 이 값으로 출발·도착 드롭다운 선택과 매칭한다.
+    async function loadTrains() {
+      const res = await fetch(`${API}/events`);
+      const data = await res.json();
+      trains = (data.events || []).map(e => {
+        const t = parseTitle(e.title);
+        return {
+          eventId: e.id,
+          name: t.name,
+          type: trainType(e.title),
+          depStation: t.depStation,
+          arrStation: t.arrStation,
+          dep: hhmm(e.opens_at),
+          arr: hhmm(e.closes_at),
+          dur: duration(e.opens_at, e.closes_at),
+          price: Number(e.min_price),
+          stdPrice: e.standard_price != null ? Number(e.standard_price) : null,
+          firstPrice: e.first_price != null ? Number(e.first_price) : null,
+          available: Number(e.available_seats),
+          total: Number(e.total_seats),
+          live: true,
+        };
+      });
+    }
+
+    let selectedTrain = null;
+    let seats = [];
+    let selectedSeat = null;
+    let queueToken = null;
+    let admitted = false;
+    let holdData = null;
+    let bookingData = null;
+    let paymentInProgress = false;
+    let paymentMethod = '신용·체크카드';
+    let paymentToastTimer = null;
+
+    // ── 공통 유틸 ──────────────────────────────────────────────
+
+    let bannerTimer = null;
+    function showBanner(type, msg, holdMs = 5000) {
+      const el = document.getElementById('banner');
+      document.getElementById('bannerMsg').textContent = msg;
+      el.className = `banner show ${type}`;
+      clearTimeout(bannerTimer);
+      if (holdMs > 0) bannerTimer = setTimeout(hideBanner, holdMs);
+    }
+    function hideBanner() {
+      document.getElementById('banner').className = 'banner';
+    }
+
+    function newKey(prefix) {
+      const rand = (crypto.randomUUID && crypto.randomUUID().slice(0, 8))
+        || Math.random().toString(36).slice(2, 10);
+      return `${prefix}-${Date.now()}-${rand}`;
+    }
+
+    async function call(method, path, { body, idemPrefix } = {}) {
+      const headers = {};
+      const opts = { method };
+      if (body) {
+        headers['Content-Type'] = 'application/json';
+        opts.body = JSON.stringify(body);
+      }
+      if (idemPrefix) headers['Idempotency-Key'] = newKey(idemPrefix);
+      opts.headers = headers;
+
+      try {
+        const res = await fetch(`${API}${path}`, opts);
+        let json = null;
+        try { json = await res.json(); } catch { /* 본문 없음 */ }
+        addLog(method, path, res.status, summarize(json));
+        return { ok: res.ok, status: res.status, body: json };
+      } catch (err) {
+        addLog(method, path, 0, `network error: ${err.message}`);
+        return { ok: false, status: 0, body: null };
+      }
+    }
+
+    function summarize(json) {
+      if (!json) return '';
+      if (json.error) return json.error;
+      if (json.booking_id) return `booking_id=${json.booking_id} ${json.status || ''}`;
+      if (json.seats) return `${json.seats.length}건`;
+      if (json.token) return `token=${String(json.token).slice(0, 8)}...`;
+      if (json.status) return json.status;
+      return '';
+    }
+
+    function addLog(method, path, status, detail) {
+      const panel = document.getElementById('logPanel');
+      const now = new Date().toTimeString().slice(0, 8);
+      const mc = method === 'GET' ? 'get' : 'post';
+      const sc = status >= 200 && status < 400 ? 'ok' : 'err';
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      entry.innerHTML = `<span style="color:#54688a">${now}</span> <span class="m ${mc}">${method}</span> ${path} → <span class="s ${sc}">${status || 'ERR'}</span> ${detail || ''}`;
+      panel.prepend(entry);
+    }
+
+    function setStep(num) {
+      document.querySelectorAll('.step').forEach(el => {
+        const n = parseInt(el.dataset.step, 10);
+        el.className = 'step' + (n === num ? ' active' : n < num ? ' done' : '');
+      });
+    }
+
+    // ── 실시간 지표 ───────────────────────────────────────────
+    function readMetric(text, name, labelFilter) {
+      let sum = 0;
+      for (const line of text.split('\n')) {
+        if (line.startsWith('#') || !line.startsWith(name)) continue;
+        if (labelFilter && !line.includes(labelFilter)) continue;
+        const value = parseFloat(line.slice(line.lastIndexOf(' ') + 1));
+        if (!Number.isNaN(value)) sum += value;
+      }
+      return sum;
+    }
+
+    function setMetric(id, value) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = value;
+    }
+
+    async function refreshMetrics() {
+      try {
+        const res = await fetch(`${API}/metrics`);
+        if (!res.ok) return;
+        const t = await res.text();
+
+        setMetric('mBooking', readMetric(t, 'ticketing_booking_total', 'result="confirmed"'));
+        setMetric('mHoldOk', readMetric(t, 'ticketing_seat_hold_total', 'result="success"'));
+        setMetric('mHoldConflict', readMetric(t, 'ticketing_seat_hold_total', 'result="conflict"'));
+        setMetric('mBookConflict', readMetric(t, 'ticketing_booking_total', 'result="conflict"'));
+        setMetric('mInFlight', readMetric(t, 'http_requests_in_flight'));
+      } catch {
+        // 수집 실패는 화면 동작에 영향을 주지 않으므로 조용히 넘어간다
+      }
+    }
+
+    function swapStations() {
+      const f = document.getElementById('fromStation');
+      const t = document.getElementById('toStation');
+      [f.value, t.value] = [t.value, f.value];
+    }
+
+    // ── 헬스체크 ──────────────────────────────────────────────
+
+    async function checkHealth() {
+      const dot = document.getElementById('healthDot');
+      const label = document.getElementById('healthLabel');
+      try {
+        const res = await fetch(`${API}/health/ready`);
+        if (res.ok) { dot.className = 'health-dot ok'; label.textContent = '정상'; }
+        else { dot.className = 'health-dot fail'; label.textContent = '일부 이상'; }
+      } catch {
+        dot.className = 'health-dot unknown'; label.textContent = '연결 끊김';
+      }
+    }
+
+    // ── 1) 열차 조회 ──────────────────────────────────────────
+
+    async function searchTrains() {
+      setStep(1);
+      await loadTrains();
+      const from = document.getElementById('fromStation').value;
+      const to = document.getElementById('toStation').value;
+      const date = document.getElementById('tripDate').value;
+      const pax = parseInt(document.getElementById('paxCount').value, 10);
+
+      if (pax > 1) {
+        showBanner('info', '다중 좌석 예매는 준비 중입니다. 이번 예매는 1석 기준으로 진행됩니다.');
+      }
+
+      // 선택한 출발·도착 구간과 일치하는 열차만 남긴다.
+      const matched = trains.filter(t => t.depStation === from && t.arrStation === to);
+
+      document.getElementById('searchSummary').innerHTML =
+         `<b>${from} → ${to}</b> · ${date} · 열차 ${matched.length}편`;
+
+      const list = document.getElementById('trainList');
+      list.innerHTML = '';
+      list.className = 'train-list';
+
+      if (matched.length === 0) {
+        list.className = '';
+        list.innerHTML = `<div class="no-route">${from} → ${to} 구간에 운행 중인 열차가 없습니다.<br>다른 구간을 선택해주세요.</div>`;
+        document.getElementById('trainListSection').style.display = 'block';
+        return;
+      }
+
+      matched.forEach(t => {
+        const item = document.createElement('div');
+        item.className = 'train-item';
+        if (!t.live) item.style.opacity = '0.55';
+
+        // 잔여율에 따라 색으로 상태를 보여준다 : 40% 이상 여유 / 15% 이상 보통 / 미만 임박
+        const ratio = t.total > 0 ? t.available / t.total : 0;
+        const remainCls = ratio >= 0.4 ? 'wide' : ratio >= 0.15 ? 'mid' : 'few';
+
+        item.innerHTML = `
+          <div class="train-top">
+            <span class="train-name">${t.name}</span>
+            <span class="train-badge ${t.type}">${t.type.toUpperCase()}</span>
+          </div>
+          <div class="train-time-row">
+            <div class="train-time"><div class="time">${t.dep}</div><div class="station">${from}</div></div>
+            <div class="train-duration"><div class="track"></div><div class="dur-text"><span>${t.dur} 소요</span></div></div>
+            <div class="train-time"><div class="time">${t.arr}</div><div class="station">${to}</div></div>
+          </div>
+          <div class="train-bottom">
+            <div class="fare">
+              <div class="fare-row">
+                <span class="cls">일반실</span>
+                <span class="amt">${(t.stdPrice ?? t.price).toLocaleString()}원</span>
+              </div>
+              <div class="fare-row first">
+                <span class="cls">특실</span>
+                ${t.firstPrice
+                  ? `<span class="amt">${t.firstPrice.toLocaleString()}원</span>`
+                  : `<span class="amt none">운행 없음</span>`}
+              </div>
+            </div>
+            <div class="seat-remain ${remainCls}">잔여 ${t.available}석 <small>/ ${t.total}석</small></div>
+          </div>
+        `;
+        if (t.live) item.onclick = () => selectTrain(t, item);
+        list.appendChild(item);
+      });
+
+      document.getElementById('trainListSection').style.display = 'block';
+    }
+
+    // ── 2) 열차 선택 → 대기열 진입 → 입장 인증 → 좌석 조회 ────
+
+    async function selectTrain(train, el) {
+      document.querySelectorAll('.train-item').forEach(i => i.classList.remove('selected'));
+      el.classList.add('selected');
+      selectedTrain = train;
+      selectedSeat = null;
+      holdData = null;
+      resetSeatButtons();
+      hideStressPanel();
+
+      setStep(2);
+      const q = await call('POST', '/queue/join', {
+        body: { event_id: train.eventId, user_id: USER_ID },
+        idemPrefix: 'q',
+      });
+      if (!q.ok) { showBanner('error', '대기열 진입에 실패했습니다. 하단 로그를 확인해주세요.'); return; }
+      queueToken = q.body.token;
+
+      const a = await call('POST', '/auth/verify', {
+        body: { event_id: train.eventId, user_id: USER_ID, token: queueToken },
+        idemPrefix: 'a',
+      });
+      admitted = a.ok;
+      if (!admitted) { showBanner('error', '입장 인증에 실패했습니다. 하단 로그를 확인해주세요.'); return; }
+
+      setStep(3);
+      await loadSeats(train.eventId);
+      document.getElementById('seatSelectCard').style.display = 'block';
+      document.getElementById('seatSelectTitle').textContent = `${train.name} 좌석 선택`;
+    }
+
+    async function loadSeats(eventId) {
+      const res = await call('GET', `/seats/${eventId}`);
+      seats = (res.body && res.body.seats) || [];
+      renderSeats();
+
+      const remain = seats.filter(s => s.status === 'AVAILABLE').length;
+      const el = document.querySelector('.train-item.selected .seat-remain');
+      if (el && selectedTrain) {
+        const ratio = selectedTrain.total > 0 ? remain / selectedTrain.total : 0;
+        el.className = 'seat-remain ' + (ratio >= 0.4 ? 'wide' : ratio >= 0.15 ? 'mid' : 'few');
+        el.innerHTML = `잔여 ${remain}석 <small>/ ${selectedTrain.total}석</small>`;
+      }
+    }
+
+    // 실제 seat_code(A001~)를 4석씩 끊어서 통로를 사이에 둔 배열로 그린다.
+    // 특실(grade가 STANDARD가 아닌 좌석)은 금색으로 구분한다.
+    function renderSeats() {
+      const layout = document.getElementById('seatLayout');
+      layout.innerHTML = '';
+
+      for (let i = 0; i < seats.length; i += 4) {
+        const chunk = seats.slice(i, i + 4);
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex; gap:5px; align-items:center;';
+
+        chunk.forEach((s, idx) => {
+          if (idx === 2) {
+            const aisle = document.createElement('div');
+            aisle.style.cssText = 'width:26px; text-align:center; font-size:10px; color:#949eab;';
+            aisle.textContent = (i / 4) + 1;
+            row.appendChild(aisle);
+          }
+          const taken = s.status !== 'AVAILABLE';
+          const prem = s.grade && s.grade !== 'STANDARD';
+          const btn = document.createElement('button');
+          btn.className = `tseat ${taken ? 'taken' : prem ? 'prem avail' : 'avail'}`;
+          btn.style.flex = '1';
+          btn.textContent = s.seat_code;
+          btn.disabled = taken;
+          btn.title = `seat_id=${s.id} status=${s.status} version=${s.version}` + (s.price ? ` price=${s.price}` : '');
+          if (!taken) btn.onclick = () => selectSeat(s, btn);
+          row.appendChild(btn);
+        });
+
+        layout.appendChild(row);
+      }
+    }
+
+    function selectSeat(seat, btn) {
+      // 선점 후 다른 좌석을 다시 고르면 진행 상태를 좌석 선점 단계 이전으로 되돌린다.
+      // 기존 선점은 취소 API가 없으므로 TTL이 지나면 자동 해제된다.
+      if (holdData) {
+        holdData = null;
+        resetSeatButtons();
+        setStep(3);
+        showBanner('info', '좌석을 다시 선택했습니다. 이전에 선점한 좌석은 유효 시간이 지나면 자동 해제됩니다.');
+      }
+
+      document.querySelectorAll('.tseat.sel').forEach(s => {
+        const orig = seats.find(x => x.seat_code === s.textContent);
+        const prem = orig && orig.grade && orig.grade !== 'STANDARD';
+        s.className = `tseat ${prem ? 'prem avail' : 'avail'}`;
+        s.style.flex = '1';
+      });
+      btn.className = 'tseat sel';
+      btn.style.flex = '1';
+      selectedSeat = seat;
+      document.getElementById('holdTrainBtn').disabled = false;
+      document.getElementById('stressBtn').disabled = false;
+
+      const info = document.getElementById('selSeatInfo');
+      const gradeLabel = (seat.grade && seat.grade !== 'STANDARD') ? seat.grade : '일반';
+      const priceLabel = seat.price ? `${Number(seat.price).toLocaleString()}원` : '';
+      info.textContent = `${seat.seat_code} · ${gradeLabel}${priceLabel ? ' · ' + priceLabel : ''}`;
+      info.className = 'sel-seat-info show';
+    }
+
+    function resetSeatButtons() {
+      const holdBtn = document.getElementById('holdTrainBtn');
+      holdBtn.style.display = 'block';
+      holdBtn.disabled = !selectedSeat;
+      const bookBtn = document.getElementById('bookTrainBtn');
+      bookBtn.style.display = 'none';
+      bookBtn.disabled = true;
+      bookBtn.textContent = '결제하기';
+    }
+
+    function hideStressPanel() {
+      document.getElementById('stressPanel').className = 'stress-panel';
+    }
+
+    // ── 동시 요청 시연 ────────────────────────────────────────
+    //
+    // 같은 좌석에 선점 요청 n건을 Promise.all 로 동시에 보낸다.
+    // 정상이라면 1건만 성공하고 나머지는 409(충돌)여야 한다 — 동시성 제어 검증.
+    // 브라우저의 동시 연결 제한이 있으므로 부하 측정 용도가 아니라 동작 시연 용도다.
+    // 부하 측정은 k6 로 별도 수행한다.
+    async function stressSeat(n = 5) { // 2026-09-17 : 10 → 5 (k6 동시성 시험 5건 기준에 맞춤)
+      if (!selectedSeat || !selectedTrain) {
+        showBanner('warn', '먼저 좌석을 선택해주세요.');
+        return;
+      }
+      openDevtools();   // 시연 결과가 접힌 영역에 가려지지 않게 펼친다
+      const seatId = selectedSeat.id;
+      const seatCode = selectedSeat.seat_code;
+
+      const reqs = Array.from({ length: n }, () =>
+        call('POST', `/seats/${seatId}/hold`, {
+          body: { event_id: selectedTrain.eventId, user_id: USER_ID },
+          idemPrefix: 'stress',
+        })
+      );
+      const results = await Promise.all(reqs);
+      const ok = results.filter(r => r.ok).length;
+
+      document.getElementById('stressOk').textContent = ok;
+      document.getElementById('stressConflict').textContent = n - ok;
+      document.getElementById('stressDesc').textContent =
+        `${seatCode} 좌석에 선점 요청 ${n}건을 동시에 보냈습니다. ` +
+        `${ok}건만 선점에 성공하고 나머지는 409로 거절되어, 중복 판매가 발생하지 않습니다.`;
+      document.getElementById('stressPanel').className = 'stress-panel show';
+
+      refreshMetrics();
+
+      // 시연으로 해당 좌석이 선점 상태가 되므로 최신 상태로 다시 그린다
+      selectedSeat = null;
+      document.getElementById('holdTrainBtn').disabled = true;
+      document.getElementById('stressBtn').disabled = true;
+      document.getElementById('selSeatInfo').className = 'sel-seat-info';
+      await loadSeats(selectedTrain.eventId);
+    }
+
+    // ── 3) 좌석 선점 ──────────────────────────────────────────
+
+    async function holdTrainSeat() {
+      if (!selectedSeat || !selectedTrain) return;
+
+      const res = await call('POST', `/seats/${selectedSeat.id}/hold`, {
+        body: { event_id: selectedTrain.eventId, user_id: USER_ID },
+        idemPrefix: 'h',
+      });
+
+      if (!res.ok) {
+        showBanner('warn', res.status === 409
+          ? '이미 선점되었거나 판매된 좌석입니다. 다른 좌석을 선택해주세요.'
+          : '좌석 선점에 실패했습니다. 하단 로그를 확인해주세요.');
+        setStep(3);
+        await loadSeats(selectedTrain.eventId);
+        return;
+      }
+
+      setStep(4);
+      refreshMetrics();
+      holdData = { seat: selectedSeat, ttl: res.body.hold_ttl_seconds };
+      document.getElementById('holdTrainBtn').style.display = 'none';
+      document.getElementById('stressBtn').disabled = true;
+      const bookBtn = document.getElementById('bookTrainBtn');
+      bookBtn.style.display = 'block';
+      bookBtn.disabled = false;
+      bookBtn.textContent = `결제하기 (${holdData.ttl}초 내)`;
+    }
+
+    /**
+     * [추가] 결제수단 선택 → 예약 생성 → Kafka 결제·알림 결과 확인
+     *
+     * 처리 순서:
+     * 1. 사용자가 결제수단을 선택한다.
+     * 2. POST /bookings로 예약을 확정한다.
+     * 3. Backend가 booking.created 이벤트를 Kafka에 발행한다.
+     * 4. paymentConsumer가 결제 결과를 저장하고 payment.completed를 발행한다.
+     * 5. notificationConsumer가 알림 처리를 완료한다.
+     * 6. 이 화면은 GET /payments/:bookingId로 결과를 확인한 뒤 완료 화면을 표시한다.
+     *
+     * 주의:
+     * 브라우저가 Kafka broker에 직접 연결되는 구조가 아니다.
+     * 실제 Kafka Producer/Consumer 처리는 Backend에서 수행한다.
+     */
+    // ── 4) 결제수단 선택 → 예매 확정 → Kafka 결제·알림 ───────
+
+    /**
+     * [추가] 결제 모달 초기화 및 표시
+     * 좌석 선점 정보와 사용자가 선택한 열차 정보를 결제창에 반영한다.
+     */
+    function openPaymentModal() {
+      if (!holdData || !selectedTrain || paymentInProgress) return;
+
+      const seat = holdData.seat;
+      const amount = Number(seat.price ?? selectedTrain.price);
+      document.getElementById('payRoute').textContent =
+        `${document.getElementById('fromStation').value} → ${document.getElementById('toStation').value}`;
+      document.getElementById('paySeat').textContent = `${selectedTrain.name} · ${seat.seat_code}`;
+      document.getElementById('payAmount').textContent = `${amount.toLocaleString()}원`;
+      document.getElementById('paymentAgree').checked = false;
+      document.getElementById('payError').textContent = '';
+      document.querySelector('input[name="paymentMethod"][value="신용·체크카드"]').checked = true;
+      document.getElementById('cardCompany').value = '';
+      document.getElementById('installment').selectedIndex = 0;
+      syncPaymentMethodOptions();
+      document.getElementById('paymentFormView').style.display = 'block';
+      document.getElementById('paymentProcessingView').className = 'payment-processing';
+      document.getElementById('paymentDoneDot').className = 'process-dot';
+      document.getElementById('notificationDoneDot').className = 'process-dot';
+      document.getElementById('paymentModal').className = 'modal-backdrop show';
+      document.getElementById('paymentModal').setAttribute('aria-hidden', 'false');
+    }
+
+    function closePaymentModal(force = false) {
+      if (paymentInProgress && !force) return;
+      const modal = document.getElementById('paymentModal');
+      modal.className = 'modal-backdrop';
+      modal.setAttribute('aria-hidden', 'true');
+    }
+
+    function syncPaymentMethodOptions() {
+      const selected = document.querySelector('input[name="paymentMethod"]:checked')?.value;
+      document.querySelector('.card-options').style.display =
+        selected === '신용·체크카드' ? 'grid' : 'none';
+    }
+
+    /**
+     * [추가] 사용자 결제 확인
+     * 필수 동의와 결제수단을 검증한 후 예약 API를 호출하고,
+     * 예약 성공 시 Kafka 기반 결제·알림 결과 조회를 시작한다.
+     */
+    async function confirmPayment() {
+      const agree = document.getElementById('paymentAgree');
+      const error = document.getElementById('payError');
+      if (!agree.checked) {
+        error.textContent = '결제 진행 동의 항목을 확인해주세요.';
+        return;
+      }
+
+      paymentMethod = document.querySelector('input[name="paymentMethod"]:checked')?.value || '신용·체크카드';
+      if (paymentMethod === '신용·체크카드' && !document.getElementById('cardCompany').value) {
+        error.textContent = '결제할 카드사를 선택해주세요.';
+        return;
+      }
+      paymentInProgress = true;
+      error.textContent = '';
+      document.getElementById('paymentFormView').style.display = 'none';
+      document.getElementById('paymentProcessingView').className = 'payment-processing show';
+      document.getElementById('processingTitle').textContent = '결제를 처리하고 있습니다';
+      document.getElementById('processingMessage').innerHTML =
+        '창을 닫거나 새로고침하지 마세요.<br>결제 승인 결과를 안전하게 확인하고 있습니다.';
+
+      const booked = await bookTrain(true);
+      if (!booked) {
+        paymentInProgress = false;
+        closePaymentModal(true);
+        return;
+      }
+
+      const payment = await waitForPaymentAndNotification();
+      paymentInProgress = false;
+
+      if (!payment) {
+        closePaymentModal(true);
+        showBanner('warn', '예약은 완료됐지만 결제 처리가 지연되고 있습니다. 잠시 후 상태 갱신을 눌러주세요.', 0);
+        return;
+      }
+
+      bookingData.payment = payment;
+      bookingData.paymentMethod = paymentMethod;
+      updateTicketPayment(payment);
+      showCompletionModal(payment);
+    }
+
+    /**
+     * [추가] Kafka Consumer 처리 결과 폴링
+     * 예약 직후 결제 데이터가 아직 생성되지 않았을 수 있으므로
+     * GET /payments/:bookingId를 최대 40회, 0.5초 간격으로 조회한다.
+     * payment 승인과 notification_sent 완료를 모두 확인하면 결과를 반환한다.
+     */
+    async function waitForPaymentAndNotification() {
+      let approvedPayment = null;
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        try {
+          const res = await fetch(`${API}/payments/${bookingData.bookingId}`);
+          if (res.ok) {
+            approvedPayment = await res.json();
+            document.getElementById('paymentDoneDot').className = 'process-dot on';
+            document.getElementById('processingTitle').textContent = '결제 승인이 완료되었습니다';
+            document.getElementById('processingMessage').innerHTML =
+              '예매 확정 알림을 전송하고 있습니다.<br>잠시만 기다려주세요.';
+            if (approvedPayment.notification_sent) {
+              document.getElementById('notificationDoneDot').className = 'process-dot on';
+              addLog('GET', `/payments/${bookingData.bookingId}`, 200, '결제 승인 및 알림 전송 완료');
+              return approvedPayment;
+            }
+          }
+        } catch {
+          // 일시적인 조회 실패는 다음 폴링에서 다시 확인한다.
+        }
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      return approvedPayment;
+    }
+
+    /**
+     * [수정] 예약 확정 API 호출
+     * POST /bookings 성공 이후 Backend가 booking.created 이벤트를 발행한다.
+     * 이 HTML 함수가 Kafka에 직접 메시지를 발행하는 것은 아니다.
+     */
+    async function bookTrain(fromPayment = false) {
+      if (!holdData || !selectedTrain) return;
+
+      const res = await call('POST', '/bookings', {
+        body: { event_id: selectedTrain.eventId, seat_id: holdData.seat.id, user_id: USER_ID },
+        idemPrefix: 'b',
+      });
+
+      if (!res.ok) {
+        showBanner('warn', res.status === 409
+          ? '예매에 실패했습니다. 좌석 충돌 또는 선점 만료입니다.'
+          : '예매 확정에 실패했습니다. 하단 로그를 확인해주세요.');
+        setStep(3);
+        holdData = null;
+        resetSeatButtons();
+        await loadSeats(selectedTrain.eventId);
+        return false;
+      }
+
+      bookingData = {
+        bookingId: res.body.booking_id,
+        status: (res.body.status || 'confirmed').toUpperCase(),
+        train: selectedTrain,
+        seat: holdData.seat,
+        from: document.getElementById('fromStation').value,
+        to: document.getElementById('toStation').value,
+        date: document.getElementById('tripDate').value,
+        pax: parseInt(document.getElementById('paxCount').value, 10),
+      };
+
+      setStep(5);
+      showTicketResult();
+      if (!fromPayment) await queryResult();
+      refreshMetrics();
+      return true;
+    }
+
+    function showTicketResult() {
+      const card = document.getElementById('resultCard');
+      const visual = document.getElementById('ticketVisual');
+      card.style.display = 'block';
+      document.getElementById('seatSelectCard').style.display = 'none';
+      document.getElementById('trainListSection').style.display = 'none';
+      document.getElementById('refreshBtn').style.display = 'block';
+
+      const b = bookingData;
+      const cls = b.status === 'CONFIRMED' ? 'confirmed' : 'pending';
+      const gradeLabel = (b.seat.grade && b.seat.grade !== 'STANDARD') ? b.seat.grade : '일반';
+
+      visual.innerHTML = `
+        <div class="ticket-top">
+          <div class="ticket-header">
+            <span class="type">${b.train.name}</span>
+            <span class="ticket-status ${cls}">${b.status === 'CONFIRMED' ? '예매 완료' : b.status}</span>
+          </div>
+          <div class="ticket-route">
+            <div class="st"><div class="city">${b.from}</div><div class="tm">${b.train.dep}</div></div>
+            <div class="mid"><div class="track"></div></div>
+            <div class="st"><div class="city">${b.to}</div><div class="tm">${b.train.arr}</div></div>
+          </div>
+          <div class="ticket-details">
+            <div><label>날짜</label><p>${b.date}</p></div>
+            <div><label>좌석</label><p>${b.seat.seat_code}</p></div>
+            <div><label>등급</label><p>${gradeLabel}</p></div>
+            <div><label>금액</label><p>${(b.seat.price ?? b.train.price).toLocaleString()}원</p></div>
+          </div>
+        </div>
+        <div class="perf"><div class="dash"></div></div>
+        <div class="ticket-foot">
+          <span class="bk-label">예약번호</span>
+          <div class="bk-id">${b.bookingId}</div>
+          <div class="pay-line" id="paymentLine">결제 승인 결과 확인 중</div>
+        </div>
+      `;
+    }
+
+    /**
+     * [추가] 결제 완료 상태 표시
+     * Kafka Consumer가 PostgreSQL에 반영한 결제 결과를 승차권 화면에 표시한다.
+     */
+    function updateTicketPayment(payment) {
+      const line = document.getElementById('paymentLine');
+      if (line) {
+        line.textContent = `결제 완료 · ${Number(payment.amount).toLocaleString()}원 · ${paymentMethod}`;
+        line.style.color = 'var(--green)';
+      }
+      const badge = document.querySelector('#ticketVisual .ticket-status');
+      if (badge) {
+        badge.className = 'ticket-status confirmed';
+        badge.textContent = '결제·예매 완료';
+      }
+    }
+
+    /**
+     * [추가] 결제·예매 완료 모달
+     * 사용자가 실제로 선택한 구간, 열차, 좌석, 결제수단, 금액,
+     * Backend가 발급한 예매번호를 완료 화면에 표시한다.
+     */
+    function showCompletionModal(payment) {
+      closePaymentModal(true);
+      const b = bookingData;
+      document.getElementById('completionDetails').innerHTML = `
+        <div class="complete-row"><span>이용 구간</span><strong>${b.from} → ${b.to}</strong></div>
+        <div class="complete-row"><span>열차·좌석</span><strong>${b.train.name} · ${b.seat.seat_code}</strong></div>
+        <div class="complete-row"><span>결제수단</span><strong>${paymentMethod}</strong></div>
+        <div class="complete-row"><span>결제금액</span><strong>${Number(payment.amount).toLocaleString()}원</strong></div>
+        <div class="complete-row"><span>예매번호</span><strong>${b.bookingId}</strong></div>
+      `;
+      document.getElementById('completionModal').className = 'modal-backdrop show';
+      document.getElementById('completionModal').setAttribute('aria-hidden', 'false');
+    }
+
+    function closeCompletionModal() {
+      const modal = document.getElementById('completionModal');
+      modal.className = 'modal-backdrop';
+      modal.setAttribute('aria-hidden', 'true');
+      showPaymentToast();
+    }
+
+    /**
+     * [추가] 예매 완료 알림
+     * 완료 모달을 닫은 뒤 열차·좌석·예매번호를 우측 상단에 안내한다.
+     */
+    function showPaymentToast() {
+      const b = bookingData;
+      if (!b) return;
+      document.getElementById('paymentToastMessage').textContent =
+        `${b.train.name} ${b.seat.seat_code} · 예매번호 ${b.bookingId}`;
+      const toast = document.getElementById('paymentToast');
+      toast.className = 'payment-toast show';
+      clearTimeout(paymentToastTimer);
+      paymentToastTimer = setTimeout(() => { toast.className = 'payment-toast'; }, 6500);
+    }
+
+    // ── 5) 결과 조회 ──────────────────────────────────────────
+
+    /**
+     * [수정] 예약·결제 결과 재조회
+     * PostgreSQL 예약 정보와 Kafka Consumer가 반영한 결제 상태를 함께 확인한다.
+     * 결제가 아직 처리 중이면 사용자에게 대기 안내를 표시한다.
+     */
+    async function queryResult() {
+      if (!bookingData) return;
+
+      const bk = await call('GET', `/bookings/${bookingData.bookingId}`);
+      if (bk.ok && bk.body.seats && bk.body.seats.length) {
+        const s = bk.body.seats[0];
+        addLog('GET', `/bookings/${bookingData.bookingId}`, 200,
+          `DB 적재 확인: ${s.seat_code} → ${s.seat_status}`);
+      }
+
+      // 결제 조회 — 결제 이벤트가 비동기로 처리되므로 완료 전에는 404가 나온다
+      const pay = await call('GET', `/payments/${bookingData.bookingId}`);
+      const line = document.getElementById('paymentLine');
+      if (line) {
+        if (pay.ok) {
+          paymentMethod = bookingData.paymentMethod || paymentMethod;
+          updateTicketPayment(pay.body);
+        } else {
+          line.textContent = '결제 처리 중입니다. 잠시 후 상태 갱신을 눌러주세요.';
+        }
+      }
+    }
+
+    // ── 초기화 ────────────────────────────────────────────────
+
+    function cancelSeatSelect() {
+      document.getElementById('seatSelectCard').style.display = 'none';
+      selectedSeat = null;
+      holdData = null;
+      resetSeatButtons();
+      hideStressPanel();
+      document.getElementById('holdTrainBtn').disabled = true;
+      document.getElementById('stressBtn').disabled = true;
+      document.getElementById('selSeatInfo').className = 'sel-seat-info';
+    }
+
+    function resetAll() {
+      selectedTrain = null; selectedSeat = null; holdData = null;
+      bookingData = null; queueToken = null; admitted = false;
+      paymentInProgress = false;
+      closePaymentModal(true);
+      document.getElementById('completionModal').className = 'modal-backdrop';
+      document.getElementById('paymentToast').className = 'payment-toast';
+      document.getElementById('trainListSection').style.display = 'none';
+      document.getElementById('resultCard').style.display = 'none';
+      cancelSeatSelect();
+      hideBanner();
+      setStep(1);
+    }
+
+    document.getElementById('tripDate').value = new Date().toISOString().slice(0, 10);
+
+    checkHealth();
+    setInterval(checkHealth, 15000);
+    refreshMetrics();
+    setInterval(refreshMetrics, 5000);
+  </script>
+</body>
+</html>

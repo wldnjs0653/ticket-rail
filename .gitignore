@@ -1,0 +1,54 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+**/config.env
+!**/config.env.example
+**/config.json
+!**/config.example.json
+**/inventory.ini
+**/hosts.ini
+!**/inventory.example.ini
+!**/hosts.example.ini
+**/secret.yaml
+**/secret.yml
+!**/secret.example.yaml
+*.key
+*.pem
+*.p12
+kubeconfig*
+
+# Dependencies and caches
+node_modules/
+__pycache__/
+*.pyc
+.ansible/
+.postgresql_collections/
+**/collections/ansible_collections/
+
+# Runtime output
+**/results/
+**/artifacts/
+**/collected/
+**/precheck-*/
+*.log
+*.pid
+*.stop
+.run.lock
+
+# Backups and archives
+*.bak
+*.bak-*
+*.bak.*
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+* copy.*
+*.202609*
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,77 @@
+---
+# Ansible Controller (.115)
+controller_kubeconfig: /root/.kube/config
+controller_python: /opt/ticket-rail-venv/bin/python
+helm_binary: /usr/local/bin/helm
+helm_version: v4.2.4
+ansible_core_version: 2.19.4
+kubernetes_core_version: 6.5.0
+
+# Kubernetes common settings
+data_namespace: data
+monitoring_namespace: monitoring
+# Static Local StorageClasses prepared by the Storage teammate
+redis_storage_class_name: ticketing-local-redis
+postgresql_storage_class_name: ticketing-local-postgresql
+kafka_storage_class_name: ticketing-local-kafka
+
+data_storage_class_names:
+  - "{{ redis_storage_class_name }}"
+  - "{{ postgresql_storage_class_name }}"
+  - "{{ kafka_storage_class_name }}"
+
+prometheus_storage_class_name: ticketing-local-prometheus
+grafana_storage_class_name: ticketing-local-grafana
+loki_storage_class_name: ticketing-local-loki
+monitoring_storage_class_names:
+  - "{{ prometheus_storage_class_name }}"
+  - "{{ grafana_storage_class_name }}"
+  - "{{ loki_storage_class_name }}"
+all_storage_class_names: "{{ data_storage_class_names + monitoring_storage_class_names }}"
+cluster_name: ticketing-k8s
+
+# Three-worker HA baseline
+ha_replica_count: 3
+worker_topology_key: kubernetes.io/hostname
+
+# Redis HA: 1 Primary + 2 Replicas + 3 Sentinels
+redis_image: redis:8.2.1-alpine
+redis_exporter_image: oliver006/redis_exporter:v1.90.0-alpine
+redis_replicas: 3
+redis_storage_size: 5Gi
+redis_master_name: ticketing-master
+redis_sentinel_quorum: 2
+redis_sentinel_down_after_ms: 5000
+redis_sentinel_failover_timeout_ms: 60000
+
+# PostgreSQL HA: 1 Primary + 2 Standbys
+cnpg_chart_version: 0.29.0
+postgresql_cluster_name: ticketing-postgresql
+postgresql_instances: 3
+postgresql_database: ticketing
+postgresql_owner: ticketing
+postgresql_storage_size: 20Gi
+
+# Kafka HA: 3 combined KRaft broker/controller nodes, RF=3, minISR=2
+strimzi_chart_version: 1.2.0
+kafka_version: 4.3.1
+kafka_metadata_version: 4.3-IV0
+kafka_cluster_name: ticketing-kafka
+kafka_node_pool_name: dual-role
+kafka_replicas: 3
+kafka_storage_size: 30Gi
+
+# Monitoring and logging
+metrics_server_chart_version: 3.14.0
+metrics_server_kubelet_insecure_tls: true
+kube_prometheus_stack_chart_version: 88.6.1
+prometheus_storage_size: 20Gi
+prometheus_retention: 3d
+grafana_storage_size: 2Gi
+grafana_ingress_enabled: true
+grafana_ingress_class: nginx
+grafana_host: grafana.ticketing.local
+loki_chart_version: 18.11.7
+loki_storage_size: 20Gi
+loki_retention: 72h
+alloy_chart_version: 1.12.1

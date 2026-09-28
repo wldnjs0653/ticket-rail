@@ -1,0 +1,195 @@
+---
+- name: Define Pod Auto Healing evidence paths
+  ansible.builtin.set_fact:
+    pod_probe_output: "{{ failure_test_run_dir }}/pod-autohealing-probe.jsonl"
+    pod_probe_stop_file: "{{ failure_test_run_dir }}/pod-autohealing.stop"
+
+- name: Remove a previous Pod probe stop file
+  ansible.builtin.file:
+    path: "{{ pod_probe_stop_file }}"
+    state: absent
+
+- name: Select the traffic probe Pod on the Worker test target
+  ansible.builtin.shell: |
+    set -euo pipefail
+    "{{ kubectl_bin }}" get pod -n "{{ traffic_test_namespace }}"       -l "app.kubernetes.io/name={{ traffic_test_name }}"       -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.spec.nodeName}{"\n"}{end}'       | awk -F'|' '$2 == "{{ worker_failure_target }}" {print $1; exit}'
+  args:
+    executable: /bin/bash
+  register: pod_failure_target
+  changed_when: false
+  failed_when: pod_failure_target.stdout | trim == ""
+
+- name: Read the Pod UID before deletion
+  ansible.builtin.command:
+    argv:
+      - "{{ kubectl_bin }}"
+      - get
+      - pod
+      - "{{ pod_failure_target.stdout | trim }}"
+      - -n
+      - "{{ traffic_test_namespace }}"
+      - -o
+      - "jsonpath={.metadata.uid}"
+  register: pod_failure_target_uid
+  changed_when: false
+  failed_when: pod_failure_target_uid.stdout | trim == ""
+
+- name: Read all traffic Pod UIDs before deletion
+  ansible.builtin.command:
+    argv:
+      - "{{ kubectl_bin }}"
+      - get
+      - pod
+      - -n
+      - "{{ traffic_test_namespace }}"
+      - -l
+      - "app.kubernetes.io/name={{ traffic_test_name }}"
+      - -o
+      - 'jsonpath={range .items[*]}{.metadata.uid}{"\n"}{end}'
+  register: pod_uids_before
+  changed_when: false
+  failed_when: pod_uids_before.stdout_lines | length != 3
+
+- name: Start the continuous user traffic probe
+  ansible.builtin.command:
+    argv:
+      - "{{ python_bin }}"
+      - "{{ playbook_dir }}/../scripts/probe_http.py"
+      - --url
+      - "{{ traffic_test_url }}"
+      - --connect-ip
+      - "{{ traffic_test_connect_ip }}"
+      - --host-header
+      - "{{ traffic_test_host }}"
+      - --tls-verify
+      - "{{ traffic_tls_verify | bool | ternary('true', 'false') }}"
+      - --interval
+      - "{{ probe_interval_seconds | string }}"
+      - --max-duration
+      - "180"
+      - --stop-file
+      - "{{ pod_probe_stop_file }}"
+      - --output
+      - "{{ pod_probe_output }}"
+  async: 210
+  poll: 0
+  register: pod_probe_job
+  changed_when: true
+
+- name: Allow baseline samples
+  ansible.builtin.wait_for:
+    timeout: 3
+  changed_when: false
+
+- name: Record the Pod deletion time
+  ansible.builtin.command:
+    argv: [date, "+%s%3N"]
+  register: pod_fault_start_ms
+  changed_when: false
+
+- name: Delete one traffic probe Pod
+  ansible.builtin.command:
+    argv:
+      - "{{ kubectl_bin }}"
+      - delete
+      - pod
+      - "{{ pod_failure_target.stdout | trim }}"
+      - -n
+      - "{{ traffic_test_namespace }}"
+      - --wait=false
+  changed_when: true
+
+- name: Wait for a new Pod UID and all traffic replicas to become Ready
+  ansible.builtin.shell: |
+    set -euo pipefail
+    deadline=$((SECONDS + 180))
+    while (( SECONDS < deadline )); do
+      desired=$("{{ kubectl_bin }}" get deployment "{{ traffic_test_name }}" \
+        -n "{{ traffic_test_namespace }}" -o jsonpath='{.spec.replicas}')
+      rows=$("{{ kubectl_bin }}" get pod -n "{{ traffic_test_namespace }}" \
+        -l "app.kubernetes.io/name={{ traffic_test_name }}" \
+        -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.metadata.uid}{"|"}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' \
+        2>/dev/null || true)
+      total=$(printf '%s\n' "$rows" | sed '/^$/d' | wc -l)
+      ready=$(printf '%s\n' "$rows" | awk -F'|' '$3 == "True" {count++} END {print count+0}')
+      old_present=$(printf '%s\n' "$rows" | awk -F'|' -v old="{{ pod_failure_target_uid.stdout | trim }}" '$2 == old {found=1} END {print found+0}')
+      replacement=$(printf '%s\n' "$rows" | awk -F'|' -v olds="{{ pod_uids_before.stdout_lines | join(',') }}" '
+        BEGIN {count=split(olds, values, ","); for (i=1; i<=count; i++) seen[values[i]]=1}
+        !($2 in seen) && $3 == "True" {print $1 "|" $2; exit}')
+      if [[ "$old_present" -eq 0 && "$total" -eq "$desired" && "$ready" -eq "$desired" && -n "$replacement" ]]; then
+        printf '%s\n' "$replacement"
+        exit 0
+      fi
+      sleep 1
+    done
+    exit 1
+  args:
+    executable: /bin/bash
+  register: pod_replacement
+  changed_when: false
+
+- name: Record the Pod recovery time
+  ansible.builtin.command:
+    argv: [date, "+%s%3N"]
+  register: pod_fault_end_ms
+  changed_when: false
+
+- name: Collect stable traffic after Pod recovery
+  ansible.builtin.wait_for:
+    timeout: 4
+  changed_when: false
+
+- name: Stop the continuous user traffic probe
+  ansible.builtin.file:
+    path: "{{ pod_probe_stop_file }}"
+    state: touch
+    mode: "0640"
+
+- name: Wait for the Pod probe job
+  ansible.builtin.async_status:
+    jid: "{{ pod_probe_job.ansible_job_id }}"
+  register: pod_probe_job_status
+  until: pod_probe_job_status.finished
+  retries: 30
+  delay: 1
+  changed_when: false
+
+- name: Analyze the Pod Auto Healing probe
+  ansible.builtin.command:
+    argv:
+      - "{{ python_bin }}"
+      - "{{ playbook_dir }}/../scripts/analyze_probe.py"
+      - --input
+      - "{{ pod_probe_output }}"
+      - --stable-successes
+      - "{{ stable_success_count | string }}"
+      - --fault-time-ms
+      - "{{ pod_fault_start_ms.stdout }}"
+  register: pod_probe_analysis
+  changed_when: false
+
+- name: Parse the Pod Auto Healing probe summary
+  ansible.builtin.set_fact:
+    pod_probe_summary: "{{ pod_probe_analysis.stdout | from_json }}"
+
+- name: Record the Pod Auto Healing result
+  ansible.builtin.set_fact:
+    failure_results: >-
+      {{
+        failure_results | combine({
+          'pod_autohealing': {
+            'status': ((pod_probe_summary.failures | int) == 0)
+              | ternary('PASS_NO_IMPACT', 'PASS_WITH_IMPACT'),
+            'deleted_pod': pod_failure_target.stdout | trim,
+            'deleted_pod_uid': pod_failure_target_uid.stdout | trim,
+            'replacement_pod': (pod_replacement.stdout | trim).split('|')[0],
+            'replacement_pod_uid': (pod_replacement.stdout | trim).split('|')[1],
+            'fault_at_epoch_ms': pod_fault_start_ms.stdout | int,
+            'recovered_at_epoch_ms': pod_fault_end_ms.stdout | int,
+            'deployment_recovery_seconds':
+              (((pod_fault_end_ms.stdout | int) - (pod_fault_start_ms.stdout | int)) / 1000) | round(3),
+            'traffic_probe': pod_probe_summary
+          }
+        })
+      }}
+

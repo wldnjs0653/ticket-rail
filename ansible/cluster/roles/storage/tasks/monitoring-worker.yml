@@ -1,0 +1,582 @@
+---
+- name: Verify Monitoring storage configuration exists
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname in monitoring_storage
+    fail_msg: >-
+      Monitoring storage configuration is not defined for
+      {{ inventory_hostname }}.
+
+- name: Set Monitoring storage configuration
+  ansible.builtin.set_fact:
+    monitoring: "{{ monitoring_storage[inventory_hostname] }}"
+
+- name: Calculate expected storage sizes
+  ansible.builtin.set_fact:
+    monitoring_target_disk_bytes: >-
+      {{ (storage_disk_size_gib | int) * 1024 * 1024 * 1024 }}
+    monitoring_disk_tolerance_bytes: >-
+      {{ (storage_disk_size_tolerance_gib | int) * 1024 * 1024 * 1024 }}
+    monitoring_partition_target_bytes: >-
+      {{
+        (monitoring.capacity | regex_replace('Gi$', '') | int)
+        * 1024 * 1024 * 1024
+      }}
+    monitoring_partition_tolerance_bytes: >-
+      {{ (storage_partition_size_tolerance_mib | int) * 1024 * 1024 }}
+
+- name: Detect root backing disk
+  ansible.builtin.shell: |
+    set -o pipefail
+
+    root_source=$(findmnt -n -o SOURCE /)
+
+    lsblk -s -n -o PATH,TYPE "$root_source" |
+    awk '$2 == "disk" { print $1; exit }'
+  args:
+    executable: /bin/bash
+  register: monitoring_root_disk
+  changed_when: false
+
+- name: Verify root backing disk was detected
+  ansible.builtin.assert:
+    that:
+      - monitoring_root_disk.stdout | trim | length > 0
+    fail_msg: >-
+      중단: OS root filesystem의 backing disk를 확인하지 못했습니다.
+      Monitoring storage 작업을 진행하지 않습니다.
+
+- name: Find existing Monitoring partition by filesystem label
+  ansible.builtin.shell: |
+    set -o pipefail
+
+    lsblk -rpn -o PATH,TYPE,LABEL |
+    awk -v label="{{ monitoring.filesystem_label }}" \
+      '$2 == "part" && $3 == label { print $1 }'
+  args:
+    executable: /bin/bash
+  register: monitoring_label_matches
+  changed_when: false
+
+- name: Verify Monitoring filesystem label is unique
+  ansible.builtin.assert:
+    that:
+      - monitoring_label_matches.stdout_lines | length <= 1
+    fail_msg: >-
+      중단: filesystem label {{ monitoring.filesystem_label }}을 사용하는
+      파티션이 여러 개 발견되었습니다.
+      matches={{ monitoring_label_matches.stdout_lines }}
+
+- name: Set existing Monitoring partition
+  ansible.builtin.set_fact:
+    monitoring_partition_device: "{{ monitoring_label_matches.stdout_lines[0] }}"
+  when:
+    - monitoring_label_matches.stdout_lines | length == 1
+
+- name: Detect existing Monitoring partition backing disk
+  ansible.builtin.shell: |
+    set -o pipefail
+
+    lsblk -s -n -o PATH,TYPE "{{ monitoring_partition_device }}" |
+    awk '$2 == "disk" { print $1; exit }'
+  args:
+    executable: /bin/bash
+  register: monitoring_existing_backing_disk
+  changed_when: false
+  when:
+    - monitoring_partition_device is defined
+
+- name: Verify existing Monitoring partition is not on the OS disk
+  ansible.builtin.assert:
+    that:
+      - monitoring_existing_backing_disk.stdout | trim | length > 0
+      - monitoring_existing_backing_disk.stdout | trim != monitoring_root_disk.stdout | trim
+    fail_msg: >-
+      중단: {{ monitoring.filesystem_label }} 파티션이 OS disk에 있거나
+      backing disk를 확인할 수 없습니다.
+      partition={{ monitoring_partition_device }}
+      root_disk={{ monitoring_root_disk.stdout | trim }}
+      backing_disk={{ monitoring_existing_backing_disk.stdout | trim }}
+  when:
+    - monitoring_partition_device is defined
+
+- name: Set storage device from existing Monitoring partition
+  ansible.builtin.set_fact:
+    storage_device: "{{ monitoring_existing_backing_disk.stdout | trim }}"
+  when:
+    - monitoring_partition_device is defined
+
+- name: Prepare a new Monitoring partition when its label is absent
+  when:
+    - monitoring_partition_device is not defined
+  block:
+    - name: Find candidate Monitoring storage disks
+      ansible.builtin.shell: |
+        set -o pipefail
+
+        min_size=$(( {{ monitoring_target_disk_bytes }} - {{ monitoring_disk_tolerance_bytes }} ))
+        max_size=$(( {{ monitoring_target_disk_bytes }} + {{ monitoring_disk_tolerance_bytes }} ))
+        root_disk="{{ monitoring_root_disk.stdout | trim }}"
+
+        lsblk -b -dn -o PATH,SIZE,TYPE |
+        awk \
+          -v min="$min_size" \
+          -v max="$max_size" \
+          -v root="$root_disk" \
+          '$3 == "disk" && $2 >= min && $2 <= max && $1 != root { print $1 }'
+      args:
+        executable: /bin/bash
+      register: monitoring_disk_candidates
+      changed_when: false
+
+    - name: Verify exactly one Monitoring storage disk was found
+      ansible.builtin.assert:
+        that:
+          - monitoring_disk_candidates.stdout_lines | length == 1
+        fail_msg: >-
+          중단: {{ storage_disk_size_gib }}GiB급 Monitoring storage disk를
+          정확히 1개 찾을 수 없습니다.
+          root_disk={{ monitoring_root_disk.stdout | trim }}
+          candidates={{ monitoring_disk_candidates.stdout_lines }}
+
+    - name: Set detected Monitoring storage disk
+      ansible.builtin.set_fact:
+        storage_device: "{{ monitoring_disk_candidates.stdout_lines[0] }}"
+
+    - name: Check whether whole Monitoring disk is mounted directly
+      ansible.builtin.command:
+        argv:
+          - findmnt
+          - -rn
+          - -S
+          - "{{ storage_device }}"
+      register: monitoring_whole_disk_mount
+      changed_when: false
+      failed_when: false
+
+    - name: Stop if whole Monitoring disk is mounted directly
+      ansible.builtin.assert:
+        that:
+          - monitoring_whole_disk_mount.rc != 0
+        fail_msg: >-
+          중단: {{ storage_device }} 전체가 직접 mount되어 있습니다.
+
+    - name: Read existing partition labels
+      ansible.builtin.shell: |
+        set -o pipefail
+
+        lsblk -rpn -o TYPE,LABEL "{{ storage_device }}" |
+        awk '$1 == "part" { print ($2 == "" ? "UNLABELED" : $2) }'
+      args:
+        executable: /bin/bash
+      register: monitoring_existing_partition_labels
+      changed_when: false
+
+    - name: Build allowed storage label list
+      ansible.builtin.set_fact:
+        monitoring_allowed_labels: >-
+          {{
+            (storage_partitions | map(attribute='filesystem_label') | list)
+            +
+            (
+              monitoring_storage
+              | dict2items
+              | map(attribute='value.filesystem_label')
+              | list
+            )
+          }}
+
+    - name: Verify existing partitions belong to this storage layout
+      ansible.builtin.assert:
+        that:
+          - >-
+            monitoring_existing_partition_labels.stdout_lines
+            | difference(monitoring_allowed_labels)
+            | length == 0
+        fail_msg: >-
+          중단: {{ storage_device }}에서 관리 대상이 아닌 파티션 label이
+          발견되었습니다.
+          labels={{ monitoring_existing_partition_labels.stdout_lines }}
+          allowed={{ monitoring_allowed_labels }}
+
+    - name: Count existing partitions on Monitoring storage disk
+      ansible.builtin.shell: |
+        lsblk -ln -o TYPE "{{ storage_device }}" |
+        grep -c '^part$' || true
+      args:
+        executable: /bin/bash
+      register: monitoring_existing_partition_count
+      changed_when: false
+
+    - name: Read whole-disk filesystem type on an unpartitioned disk
+      ansible.builtin.command:
+        argv:
+          - lsblk
+          - -dnro
+          - FSTYPE
+          - "{{ storage_device }}"
+      register: monitoring_whole_disk_fstype
+      changed_when: false
+      when:
+        - monitoring_existing_partition_count.stdout | int == 0
+
+    - name: Verify unpartitioned disk has no filesystem
+      ansible.builtin.assert:
+        that:
+          - monitoring_whole_disk_fstype.stdout | trim == ""
+        fail_msg: >-
+          중단: {{ storage_device }} 전체에 filesystem이 존재합니다.
+          fstype={{ monitoring_whole_disk_fstype.stdout | trim }}
+      when:
+        - monitoring_existing_partition_count.stdout | int == 0
+
+    - name: Create GPT partition table on a new Monitoring disk
+      ansible.builtin.command:
+        argv:
+          - parted
+          - -s
+          - "{{ storage_device }}"
+          - mklabel
+          - gpt
+      when:
+        - monitoring_existing_partition_count.stdout | int == 0
+
+    - name: Read partitions before Monitoring partition creation
+      ansible.builtin.shell: |
+        lsblk -lnpo PATH,TYPE "{{ storage_device }}" |
+        awk '$2 == "part" { print $1 }'
+      args:
+        executable: /bin/bash
+      register: monitoring_partitions_before
+      changed_when: false
+
+    - name: Read free space on Monitoring storage disk
+      ansible.builtin.command:
+        argv:
+          - parted
+          - -m
+          - -s
+          - "{{ storage_device }}"
+          - unit
+          - MiB
+          - print
+          - free
+      register: monitoring_free_space
+      changed_when: false
+
+    - name: Collect free space regions
+      ansible.builtin.set_fact:
+        monitoring_free_regions: >-
+          {{
+            monitoring_free_space.stdout_lines
+            | select('search', 'free;')
+            | list
+          }}
+
+    - name: Verify free space was found
+      ansible.builtin.assert:
+        that:
+          - monitoring_free_regions | length > 0
+        fail_msg: >-
+          중단: {{ storage_device }}에서 사용할 수 있는 free space를
+          찾지 못했습니다.
+
+    - name: Select the last free space region
+      ansible.builtin.set_fact:
+        monitoring_free_region: "{{ (monitoring_free_regions | last).split(':') }}"
+
+    - name: Verify free space output format
+      ansible.builtin.assert:
+        that:
+          - monitoring_free_region | length >= 5
+        fail_msg: >-
+          중단: parted free space 출력을 해석할 수 없습니다.
+          value={{ monitoring_free_regions | last }}
+
+    - name: Calculate Monitoring partition boundaries
+      ansible.builtin.set_fact:
+        monitoring_start_mib: >-
+          {{
+            [
+              monitoring_free_region[1]
+              | regex_replace('MiB$', '')
+              | float,
+              storage_partition_start_mib | float
+            ]
+            | max
+          }}
+        monitoring_free_end_mib: >-
+          {{ monitoring_free_region[2] | regex_replace('MiB$', '') | float }}
+        monitoring_size_mib: >-
+          {{ (monitoring.capacity | regex_replace('Gi$', '') | float) * 1024 }}
+
+    - name: Verify enough free space exists
+      ansible.builtin.assert:
+        that:
+          - >-
+            (monitoring_free_end_mib | float)
+            - (monitoring_start_mib | float)
+            >= (monitoring_size_mib | float)
+        fail_msg: >-
+          중단: {{ storage_device }}에 {{ monitoring.service }}용 공간이
+          부족합니다.
+          required={{ monitoring_size_mib }}MiB
+          available={{
+            (monitoring_free_end_mib | float)
+            - (monitoring_start_mib | float)
+          }}MiB
+
+    - name: Calculate Monitoring partition end
+      ansible.builtin.set_fact:
+        monitoring_end_mib: >-
+          {{ (monitoring_start_mib | float) + (monitoring_size_mib | float) }}
+
+    - name: Create Monitoring partition
+      ansible.builtin.command:
+        argv:
+          - parted
+          - -s
+          - "{{ storage_device }}"
+          - unit
+          - MiB
+          - mkpart
+          - primary
+          - xfs
+          - "{{ monitoring_start_mib }}MiB"
+          - "{{ monitoring_end_mib }}MiB"
+
+    - name: Reload Monitoring partition table
+      ansible.builtin.command:
+        argv:
+          - partprobe
+          - "{{ storage_device }}"
+
+    - name: Wait for Monitoring partition device
+      ansible.builtin.command:
+        cmd: udevadm settle
+
+    - name: Read partitions after Monitoring partition creation
+      ansible.builtin.shell: |
+        lsblk -lnpo PATH,TYPE "{{ storage_device }}" |
+        awk '$2 == "part" { print $1 }'
+      args:
+        executable: /bin/bash
+      register: monitoring_partitions_after
+      changed_when: false
+
+    - name: Find newly created Monitoring partition
+      ansible.builtin.set_fact:
+        monitoring_new_partitions: >-
+          {{
+            monitoring_partitions_after.stdout_lines
+            | difference(monitoring_partitions_before.stdout_lines)
+          }}
+
+    - name: Verify exactly one Monitoring partition was created
+      ansible.builtin.assert:
+        that:
+          - monitoring_new_partitions | length == 1
+        fail_msg: >-
+          중단: 새 Monitoring 파티션을 정확히 식별할 수 없습니다.
+          before={{ monitoring_partitions_before.stdout_lines }}
+          after={{ monitoring_partitions_after.stdout_lines }}
+
+    - name: Set newly created Monitoring partition
+      ansible.builtin.set_fact:
+        monitoring_partition_device: "{{ monitoring_new_partitions[0] }}"
+
+- name: Verify Monitoring partition device was resolved
+  ansible.builtin.assert:
+    that:
+      - monitoring_partition_device is defined
+      - monitoring_partition_device | length > 0
+    fail_msg: >-
+      중단: {{ monitoring.service }} Monitoring 파티션을 확인하지 못했습니다.
+
+- name: Read Monitoring partition size
+  ansible.builtin.command:
+    argv:
+      - blockdev
+      - --getsize64
+      - "{{ monitoring_partition_device }}"
+  register: monitoring_partition_size
+  changed_when: false
+
+- name: Verify Monitoring partition size
+  ansible.builtin.assert:
+    that:
+      - >-
+        monitoring_partition_size.stdout | int
+        >=
+        (monitoring_partition_target_bytes | int)
+        - (monitoring_partition_tolerance_bytes | int)
+      - >-
+        monitoring_partition_size.stdout | int
+        <=
+        (monitoring_partition_target_bytes | int)
+        + (monitoring_partition_tolerance_bytes | int)
+    fail_msg: >-
+      중단: {{ monitoring.filesystem_label }} 파티션 용량이 예상과 다릅니다.
+      partition={{ monitoring_partition_device }}
+      expected={{ monitoring.capacity }}
+      actual={{ monitoring_partition_size.stdout | trim }} bytes
+
+- name: Read Monitoring filesystem type
+  ansible.builtin.command:
+    argv:
+      - lsblk
+      - -dnro
+      - FSTYPE
+      - "{{ monitoring_partition_device }}"
+  register: monitoring_fstype
+  changed_when: false
+
+- name: Verify Monitoring filesystem type
+  ansible.builtin.assert:
+    that:
+      - monitoring_fstype.stdout | trim in ["", "xfs"]
+    fail_msg: >-
+      중단: {{ monitoring_partition_device }}에 예상하지 못한 filesystem이
+      있습니다. actual={{ monitoring_fstype.stdout | trim }}
+
+- name: Create Monitoring XFS filesystem
+  ansible.builtin.command:
+    argv:
+      - mkfs.xfs
+      - -L
+      - "{{ monitoring.filesystem_label }}"
+      - "{{ monitoring_partition_device }}"
+  when:
+    - monitoring_fstype.stdout | trim == ""
+
+- name: Wait for Monitoring filesystem metadata
+  ansible.builtin.command:
+    cmd: udevadm settle
+  changed_when: false
+
+- name: Read final Monitoring filesystem label
+  ansible.builtin.command:
+    argv:
+      - lsblk
+      - -dnro
+      - LABEL
+      - "{{ monitoring_partition_device }}"
+  register: monitoring_final_label
+  changed_when: false
+
+- name: Verify final Monitoring filesystem label
+  ansible.builtin.assert:
+    that:
+      - monitoring_final_label.stdout | trim == monitoring.filesystem_label
+    fail_msg: >-
+      중단: Monitoring filesystem label이 예상과 다릅니다.
+      partition={{ monitoring_partition_device }}
+      expected={{ monitoring.filesystem_label }}
+      actual={{ monitoring_final_label.stdout | trim }}
+
+- name: Create Monitoring mount directory
+  ansible.builtin.file:
+    path: "{{ monitoring.mount_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0777"
+
+- name: Check existing Monitoring mount point
+  ansible.builtin.command:
+    argv:
+      - mountpoint
+      - -q
+      - "{{ monitoring.mount_path }}"
+  register: monitoring_existing_mountpoint
+  changed_when: false
+  failed_when: false
+
+- name: Check unmounted Monitoring directory for existing data
+  ansible.builtin.shell: |
+    if [ -n "$(find "{{ monitoring.mount_path }}" \
+      -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
+      echo NOT_EMPTY
+    else
+      echo EMPTY
+    fi
+  args:
+    executable: /bin/bash
+  register: monitoring_mount_directory_state
+  changed_when: false
+  when:
+    - monitoring_existing_mountpoint.rc != 0
+
+- name: Stop if unmounted Monitoring directory contains data
+  ansible.builtin.assert:
+    that:
+      - monitoring_mount_directory_state.stdout | trim == "EMPTY"
+    fail_msg: >-
+      중단: {{ monitoring.mount_path }}에 기존 데이터가 남아 있습니다.
+      filesystem을 mount하면 데이터가 가려질 수 있습니다.
+  when:
+    - monitoring_existing_mountpoint.rc != 0
+
+- name: Read Monitoring filesystem UUID
+  ansible.builtin.command:
+    argv:
+      - blkid
+      - -s
+      - UUID
+      - -o
+      - value
+      - "{{ monitoring_partition_device }}"
+  register: monitoring_uuid
+  changed_when: false
+
+- name: Verify Monitoring filesystem UUID
+  ansible.builtin.assert:
+    that:
+      - monitoring_uuid.stdout | trim | length > 0
+    fail_msg: >-
+      중단: {{ monitoring_partition_device }}의 UUID를 확인할 수 없습니다.
+
+- name: Mount Monitoring storage by UUID
+  ansible.posix.mount:
+    path: "{{ monitoring.mount_path }}"
+    src: "UUID={{ monitoring_uuid.stdout | trim }}"
+    fstype: xfs
+    opts: defaults
+    dump: "0"
+    passno: "0"
+    state: mounted
+
+- name: Read mounted Monitoring filesystem information
+  ansible.builtin.shell: |
+    set -o pipefail
+
+    mounted_source=$(findmnt -rn -T "{{ monitoring.mount_path }}" -o SOURCE)
+    mounted_fstype=$(findmnt -rn -T "{{ monitoring.mount_path }}" -o FSTYPE)
+    mounted_uuid=$(blkid -s UUID -o value "$mounted_source")
+
+    printf '%s|%s|%s\n' "$mounted_source" "$mounted_fstype" "$mounted_uuid"
+  args:
+    executable: /bin/bash
+  register: monitoring_mounted_filesystem
+  changed_when: false
+
+- name: Verify mounted Monitoring filesystem
+  ansible.builtin.assert:
+    that:
+      - monitoring_mounted_filesystem.stdout.split('|') | length == 3
+      - monitoring_mounted_filesystem.stdout.split('|')[1] == "xfs"
+      - >-
+        monitoring_mounted_filesystem.stdout.split('|')[2]
+        == monitoring_uuid.stdout | trim
+    fail_msg: >-
+      중단: {{ monitoring.mount_path }}의 mount 상태가 예상과 다릅니다.
+      expected_uuid={{ monitoring_uuid.stdout | trim }}
+      actual={{ monitoring_mounted_filesystem.stdout }}
+
+- name: Show Monitoring storage result
+  ansible.builtin.debug:
+    msg: >-
+      Monitoring storage verification passed on {{ inventory_hostname }}.
+      service={{ monitoring.service }},
+      partition={{ monitoring_partition_device }},
+      mount_path={{ monitoring.mount_path }}

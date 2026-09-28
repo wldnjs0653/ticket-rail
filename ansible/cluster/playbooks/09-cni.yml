@@ -1,0 +1,59 @@
+---
+- name: Install Calico CNI
+  hosts: master1
+  become: true
+  gather_facts: false
+
+  tasks:
+
+    - name: Download Calico manifest
+      ansible.builtin.get_url:
+        url: https://raw.githubusercontent.com/projectcalico/calico/v3.32.1/manifests/calico.yaml
+        dest: /root/calico.yaml
+        owner: root
+        group: root
+        mode: "0644"
+        force: true
+
+    - name: Configure Calico Pod CIDR
+      ansible.builtin.replace:
+        path: /root/calico.yaml
+        regexp: '(^\s*)# - name: CALICO_IPV4POOL_CIDR\n(\s*)# value: "192\.168\.0\.0/16"'
+        replace: '\1- name: CALICO_IPV4POOL_CIDR\n\2value: "10.244.0.0/16"'
+
+    - name: Configure Calico IPIP
+      ansible.builtin.replace:
+        path: /root/calico.yaml
+        regexp: '(^\s*)- name: CALICO_IPV4POOL_IPIP\n(\s*)value: "Always"'
+        replace: '\1- name: CALICO_IPV4POOL_IPIP\n\2value: "Never"'
+
+    - name: Configure Calico VXLAN
+      ansible.builtin.replace:
+        path: /root/calico.yaml
+        regexp: '(^\s*)- name: CALICO_IPV4POOL_VXLAN\n(\s*)value: "Never"'
+        replace: '\1- name: CALICO_IPV4POOL_VXLAN\n\2value: "Always"'
+
+    - name: Apply Calico manifest
+      ansible.builtin.command:
+        cmd: kubectl apply -f /root/calico.yaml
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+
+    - name: Wait for Calico node pods
+      ansible.builtin.command:
+        cmd: kubectl wait --for=condition=Ready pods -l k8s-app=calico-node -n kube-system --timeout=300s
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      changed_when: false
+
+    - name: Check Calico node pods
+      ansible.builtin.command:
+        cmd: kubectl get pods -n kube-system -l k8s-app=calico-node -o wide
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: calico_pods
+      changed_when: false
+
+    - name: Show Calico node pods
+      ansible.builtin.debug:
+        var: calico_pods.stdout_lines

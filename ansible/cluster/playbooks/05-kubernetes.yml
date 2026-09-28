@@ -1,0 +1,59 @@
+---
+- name: Install Kubernetes packages
+  hosts: k8s
+  become: true
+  gather_facts: true
+
+  tasks:
+
+    - name: Create Kubernetes repository
+      ansible.builtin.copy:
+        dest: /etc/yum.repos.d/kubernetes.repo
+        mode: "0644"
+        content: |
+          [kubernetes]
+          name=Kubernetes
+          baseurl=https://pkgs.k8s.io/core:/stable:/v1.36/rpm/
+          enabled=1
+          gpgcheck=1
+          gpgkey=https://pkgs.k8s.io/core:/stable:/v1.36/rpm/repodata/repomd.xml.key
+          exclude=kubelet kubeadm kubectl cri-tools kubernetes-cni
+
+    - name: Install kubelet kubeadm kubectl
+      ansible.builtin.dnf:
+        name:
+          - kubelet
+          - kubeadm
+          - kubectl
+        state: present
+        disable_excludes: kubernetes
+
+    - name: Enable kubelet
+      ansible.builtin.systemd:
+        name: kubelet
+        enabled: true
+
+    - name: Check kubeadm version
+      ansible.builtin.command:
+        cmd: kubeadm version -o short
+      register: kubeadm_version
+      changed_when: false
+
+    - name: Check kubelet version
+      ansible.builtin.command:
+        cmd: kubelet --version
+      register: kubelet_version
+      changed_when: false
+
+    - name: Check kubectl version
+      ansible.builtin.command:
+        cmd: kubectl version --client -o yaml
+      register: kubectl_version
+      changed_when: false
+
+    - name: Show Kubernetes versions
+      ansible.builtin.debug:
+        msg:
+          - "kubeadm: {{ kubeadm_version.stdout }}"
+          - "kubelet: {{ kubelet_version.stdout }}"
+          - "kubectl: {{ kubectl_version.stdout | regex_search('gitVersion:.*') | default('version checked') }}"

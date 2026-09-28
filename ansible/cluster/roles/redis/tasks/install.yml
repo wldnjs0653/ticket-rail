@@ -1,0 +1,11 @@
+---
+- name: Install Redis package
+  ansible.builtin.dnf:
+    name: redis
+    state: present
+
+- name: Enable and start Redis service
+  ansible.builtin.systemd:
+    name: redis
+    enabled: true
+    state: started

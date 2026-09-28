@@ -1,0 +1,51 @@
+---
+- name: Install dependencies and test all Node.js services
+  hosts: localhost
+  connection: local
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - vars/main.yml
+
+  vars:
+    node_services:
+      - mock-payment
+      - mock-notification
+      - payment-consumer
+      - notification-consumer
+
+  tasks:
+    - name: Check every Node.js service package lock
+      ansible.builtin.stat:
+        path: "{{ project_root }}/{{ item }}/package-lock.json"
+      loop: "{{ node_services }}"
+      register: package_locks
+
+    - name: Require complete locked service sources
+      ansible.builtin.assert:
+        that:
+          - package_locks.results | map(attribute='stat.exists') | min
+        fail_msg: "One or more service package-lock.json files are missing under {{ project_root }}."
+
+    - name: Install locked dependencies
+      ansible.builtin.command:
+        cmd: /usr/local/bin/npm ci
+        chdir: "{{ project_root }}/{{ item }}"
+      environment:
+        npm_config_audit: "false"
+        npm_config_fund: "false"
+      loop: "{{ node_services }}"
+      changed_when: true
+
+    - name: Run every automated test suite
+      ansible.builtin.command:
+        cmd: /usr/local/bin/npm test
+        chdir: "{{ project_root }}/{{ item }}"
+      loop: "{{ node_services }}"
+      changed_when: false
+
+    - name: Print the test summary
+      ansible.builtin.debug:
+        msg: "All four Node.js service test suites passed."
+

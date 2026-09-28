@@ -1,0 +1,218 @@
+---
+- name: Define Worker failure evidence paths
+  ansible.builtin.set_fact:
+    worker_probe_output: "{{ failure_test_run_dir }}/worker-failure-probe.jsonl"
+    worker_probe_stop_file: "{{ failure_test_run_dir }}/worker-failure.stop"
+
+- name: Remove a previous Worker probe stop file
+  ansible.builtin.file:
+    path: "{{ worker_probe_stop_file }}"
+    state: absent
+
+- name: Start continuous traffic during the Worker failure
+  ansible.builtin.command:
+    argv:
+      - "{{ python_bin }}"
+      - "{{ playbook_dir }}/../scripts/probe_http.py"
+      - --url
+      - "{{ traffic_test_url }}"
+      - --connect-ip
+      - "{{ traffic_test_connect_ip }}"
+      - --host-header
+      - "{{ traffic_test_host }}"
+      - --tls-verify
+      - "{{ traffic_tls_verify | bool | ternary('true', 'false') }}"
+      - --interval
+      - "{{ probe_interval_seconds | string }}"
+      - --max-duration
+      - "300"
+      - --stop-file
+      - "{{ worker_probe_stop_file }}"
+      - --output
+      - "{{ worker_probe_output }}"
+  async: 330
+  poll: 0
+  register: worker_probe_job
+  changed_when: true
+
+- name: Allow Worker baseline samples
+  ansible.builtin.wait_for:
+    timeout: 3
+  changed_when: false
+
+- name: Record the Worker fault start time
+  ansible.builtin.command:
+    argv: [date, "+%s%3N"]
+  register: worker_fault_start_ms
+  changed_when: false
+
+- name: Simulate and recover one Application Worker failure
+  block:
+    - name: Stop kubelet on the Application Worker
+      ansible.builtin.systemd_service:
+        name: kubelet
+        state: stopped
+      delegate_to: "{{ worker_failure_target }}"
+      become: true
+
+    - name: Stop containerd on the Application Worker
+      ansible.builtin.systemd_service:
+        name: containerd
+        state: stopped
+      delegate_to: "{{ worker_failure_target }}"
+      become: true
+
+    - name: Wait until the Application Worker is NotReady
+      ansible.builtin.command:
+        argv:
+          - "{{ kubectl_bin }}"
+          - get
+          - node
+          - "{{ worker_failure_target }}"
+          - -o
+          - 'jsonpath={.status.conditions[?(@.type=="Ready")].status}'
+      register: worker_ready_during_fault
+      changed_when: false
+      until:
+        - worker_ready_during_fault.rc == 0
+        - worker_ready_during_fault.stdout | trim in ['False', 'Unknown']
+      retries: "{{ (node_notready_timeout_seconds / 2) | int }}"
+      delay: 2
+
+    - name: Record when the Application Worker became NotReady
+      ansible.builtin.command:
+        argv: [date, "+%s%3N"]
+      register: worker_notready_ms
+      changed_when: false
+
+    - name: Require every other Kubernetes node to remain Ready
+      ansible.builtin.shell: |
+        set -euo pipefail
+        for node in {{ (groups['cluster_nodes'] | difference([worker_failure_target])) | join(' ') }}; do
+          status=$("{{ kubectl_bin }}" get node "$node" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+          [[ "$status" == "True" ]] || { echo "$node Ready=$status" >&2; exit 1; }
+        done
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Hold the Worker outage briefly
+      ansible.builtin.wait_for:
+        timeout: 5
+      changed_when: false
+
+  always:
+    - name: Record the Worker restore command time
+      ansible.builtin.command:
+        argv: [date, "+%s%3N"]
+      register: worker_restore_start_ms
+      changed_when: false
+
+    - name: Start containerd on the Application Worker
+      ansible.builtin.systemd_service:
+        name: containerd
+        state: started
+        enabled: true
+      delegate_to: "{{ worker_failure_target }}"
+      become: true
+
+    - name: Start kubelet on the Application Worker
+      ansible.builtin.systemd_service:
+        name: kubelet
+        state: started
+        enabled: true
+      delegate_to: "{{ worker_failure_target }}"
+      become: true
+
+    - name: Wait for the Application Worker to recover
+      ansible.builtin.command:
+        argv:
+          - "{{ kubectl_bin }}"
+          - wait
+          - --for=condition=Ready
+          - "node/{{ worker_failure_target }}"
+          - "--timeout={{ node_ready_timeout_seconds }}s"
+      changed_when: false
+
+    - name: Wait for all traffic probe replicas after Worker recovery
+      ansible.builtin.shell: |
+        set -euo pipefail
+        deadline=$((SECONDS + 240))
+        while (( SECONDS < deadline )); do
+          desired=$("{{ kubectl_bin }}" get deployment "{{ traffic_test_name }}" -n "{{ traffic_test_namespace }}" -o jsonpath='{.spec.replicas}')
+          available=$("{{ kubectl_bin }}" get deployment "{{ traffic_test_name }}" -n "{{ traffic_test_namespace }}" -o jsonpath='{.status.availableReplicas}')
+          [[ "${available:-0}" == "$desired" ]] && exit 0
+          sleep 2
+        done
+        exit 1
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+- name: Record the Worker recovery time
+  ansible.builtin.command:
+    argv: [date, "+%s%3N"]
+  register: worker_fault_end_ms
+  changed_when: false
+
+- name: Collect stable traffic after Worker recovery
+  ansible.builtin.wait_for:
+    timeout: 4
+  changed_when: false
+
+- name: Stop the Worker failure traffic probe
+  ansible.builtin.file:
+    path: "{{ worker_probe_stop_file }}"
+    state: touch
+    mode: "0640"
+
+- name: Wait for the Worker failure probe job
+  ansible.builtin.async_status:
+    jid: "{{ worker_probe_job.ansible_job_id }}"
+  register: worker_probe_job_status
+  until: worker_probe_job_status.finished
+  retries: 30
+  delay: 1
+  changed_when: false
+
+- name: Analyze the Worker failure probe
+  ansible.builtin.command:
+    argv:
+      - "{{ python_bin }}"
+      - "{{ playbook_dir }}/../scripts/analyze_probe.py"
+      - --input
+      - "{{ worker_probe_output }}"
+      - --stable-successes
+      - "{{ stable_success_count | string }}"
+      - --fault-time-ms
+      - "{{ worker_fault_start_ms.stdout }}"
+  register: worker_probe_analysis
+  changed_when: false
+
+- name: Parse the Worker probe summary
+  ansible.builtin.set_fact:
+    worker_probe_summary: "{{ worker_probe_analysis.stdout | from_json }}"
+
+- name: Record the Application Worker result
+  ansible.builtin.set_fact:
+    failure_results: >-
+      {{
+        failure_results | combine({
+          'application_worker_failure': {
+            'status': ((worker_probe_summary.failures | int) == 0)
+              | ternary('PASS_NO_IMPACT', 'PASS_WITH_IMPACT'),
+            'target': worker_failure_target,
+            'fault_at_epoch_ms': worker_fault_start_ms.stdout | int,
+            'notready_at_epoch_ms': worker_notready_ms.stdout | int,
+            'restore_started_at_epoch_ms': worker_restore_start_ms.stdout | int,
+            'recovered_at_epoch_ms': worker_fault_end_ms.stdout | int,
+            'node_recovery_seconds':
+              (((worker_fault_end_ms.stdout | int) - (worker_fault_start_ms.stdout | int)) / 1000) | round(3),
+            'restore_recovery_seconds':
+              (((worker_fault_end_ms.stdout | int) - (worker_restore_start_ms.stdout | int)) / 1000) | round(3),
+            'traffic_probe': worker_probe_summary
+          }
+        })
+      }}
+
+

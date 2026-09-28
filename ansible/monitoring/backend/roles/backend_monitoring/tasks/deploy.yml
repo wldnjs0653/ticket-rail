@@ -1,0 +1,51 @@
+---
+- name: Set temporary ServiceMonitor manifest path
+  ansible.builtin.set_fact:
+    backend_servicemonitor_temp_path: /tmp/ticketing-backend-servicemonitor.yml
+
+- name: Render and apply backend ServiceMonitor
+  block:
+    - name: Render backend ServiceMonitor manifest
+      ansible.builtin.template:
+        src: backend-servicemonitor.yml.j2
+        dest: "{{ backend_servicemonitor_temp_path }}"
+        mode: "0600"
+
+    - name: Apply backend ServiceMonitor with kubectl
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig
+          - "{{ kubeconfig_path }}"
+          - apply
+          - --filename
+          - "{{ backend_servicemonitor_temp_path }}"
+      register: backend_servicemonitor_apply
+      changed_when: >-
+        ' created' in backend_servicemonitor_apply.stdout or
+        ' configured' in backend_servicemonitor_apply.stdout
+
+    - name: Check deployed backend ServiceMonitor
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig
+          - "{{ kubeconfig_path }}"
+          - --namespace
+          - "{{ monitoring_namespace }}"
+          - get
+          - servicemonitor.monitoring.coreos.com
+          - "{{ backend_servicemonitor_name }}"
+      register: backend_servicemonitor_check
+      changed_when: false
+
+    - name: Report backend ServiceMonitor deployment
+      ansible.builtin.debug:
+        msg: "Backend ServiceMonitor 생성 확인 완료: {{ backend_servicemonitor_check.stdout }}"
+
+  always:
+    - name: Remove only the generated temporary manifest
+      ansible.builtin.file:
+        path: "{{ backend_servicemonitor_temp_path }}"
+        state: absent
+

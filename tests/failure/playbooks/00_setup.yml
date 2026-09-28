@@ -1,0 +1,94 @@
+---
+- name: Prepare the failure-test controller
+  hosts: controller
+  gather_facts: false
+  vars:
+    required_controller_commands:
+      - bash
+      - ansible
+      - ansible-playbook
+      - kubectl
+      - python3
+      - curl
+      - date
+      - openssl
+      - timedatectl
+    required_project_files:
+      - "{{ playbook_dir }}/../inventory.ini"
+      - "{{ playbook_dir }}/../group_vars/all.yml"
+      - "{{ playbook_dir }}/../tasks/00_precheck.yml"
+      - "{{ playbook_dir }}/../tasks/10_pod_autohealing.yml"
+      - "{{ playbook_dir }}/../tasks/20_worker_failure.yml"
+      - "{{ playbook_dir }}/../tasks/30_master_failure.yml"
+      - "{{ playbook_dir }}/../tasks/40_lb_failure.yml"
+      - "{{ playbook_dir }}/../tasks/50_redis_failover.yml"
+      - "{{ playbook_dir }}/../tasks/60_postgresql_failover.yml"
+      - "{{ playbook_dir }}/../tasks/70_kafka_failure.yml"
+      - "{{ playbook_dir }}/../tasks/94_stop_probes.yml"
+      - "{{ playbook_dir }}/../tasks/99_recovery.yml"
+      - "{{ playbook_dir }}/../scripts/analyze_probe.py"
+      - "{{ playbook_dir }}/../grafana/failure-tests-dashboard.json"
+
+  tasks:
+    - name: Check required controller commands
+      ansible.builtin.command:
+        argv: [bash, -lc, "command -v {{ item }}"]
+      loop: "{{ required_controller_commands }}"
+      changed_when: false
+
+    - name: Check required project files
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop: "{{ required_project_files }}"
+      register: required_file_checks
+
+    - name: Require every project file
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+        fail_msg: "필수 파일이 없습니다: {{ item.item }}"
+      loop: "{{ required_file_checks.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Create the result root
+      ansible.builtin.file:
+        path: "{{ results_root }}"
+        state: directory
+        mode: "0750"
+
+    - name: Check kubeconfig
+      ansible.builtin.stat:
+        path: "{{ kubeconfig_path }}"
+      register: kubeconfig_check
+
+    - name: Require kubeconfig
+      ansible.builtin.assert:
+        that:
+          - kubeconfig_check.stat.exists
+          - kubeconfig_check.stat.isreg
+        fail_msg: "kubeconfig가 없습니다: {{ kubeconfig_path }}"
+
+    - name: Check UTC clock and NTP state
+      ansible.builtin.shell: |
+        set -euo pipefail
+        printf 'utc=%s\n' "$(date -u -Ins)"
+        printf 'ntp=%s\n' "$(timedatectl show -p NTPSynchronized --value)"
+      args:
+        executable: /bin/bash
+      register: clock_check
+      changed_when: false
+
+    - name: Require NTP synchronization
+      ansible.builtin.assert:
+        that:
+          - "'ntp=yes' in clock_check.stdout"
+        fail_msg: "Controller NTP가 동기화되지 않았습니다: {{ clock_check.stdout }}"
+
+    - name: Print setup result
+      ansible.builtin.debug:
+        msg:
+          - "기본 세팅 확인 완료"
+          - "결과 루트: {{ results_root }}"
+          - "다음 단계: scripts/01_precheck.sh"

@@ -1,0 +1,107 @@
+  # Kubernetes에서 무엇을 만들지정의하는 파일
+---
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: backend
+  namespace: app
+
+spec:
+  replicas: 2
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+  selector:
+    matchLabels:
+      app: backend
+
+  template:
+    metadata:
+      labels:
+        app: backend
+
+    spec:
+      # 최초 구축용 설정이며, 이후 이미지 버전은 CI/CD가 관리한다.
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+
+      containers:
+        - name: backend
+          image: ghcr.io/your-org/ticketing-api:replace-me
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              containerPort: 3000
+
+          env:
+            - name: PORT
+              value: "3000"
+
+            - name: REDIS_SENTINELS
+              value: "redis-sentinel.data:26379"
+
+            - name: REDIS_SENTINEL_MASTER
+              value: "ticketing-master"
+
+            - name: PG_HOST
+              value: "ticketing-postgresql-rw.data"
+
+            - name: PG_PORT
+              value: "5432"
+
+            - name: PG_DATABASE
+              value: "ticketing"
+
+            - name: SKIP_KAFKA_CONSUMERS
+              value: "false"
+
+            - name: KAFKA_BROKERS
+              value: "ticketing-kafka-kafka-bootstrap.data.svc.cluster.local:9092"
+
+            - name: KAFKA_CLIENT_ID
+              value: "ticketing-backend"
+
+            - name: KAFKA_CONSUMER_GROUP
+              value: "ticketing-backend-consumers"
+
+          envFrom:
+            - secretRef:
+                name: backend-secret
+
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app: backend

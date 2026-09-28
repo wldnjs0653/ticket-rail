@@ -1,0 +1,37 @@
+BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;
+SET LOCAL statement_timeout = '8s';
+WITH b AS (
+  SELECT id, user_id, event_id, status FROM public.booking WHERE id={{ winner_booking_id | int }}
+), bs AS (
+  SELECT booking_id, seat_id FROM public.booking_seat WHERE booking_id={{ winner_booking_id | int }}
+), s AS (
+  SELECT id, event_id, status FROM public.seat WHERE id={{ seat_id | int }}
+), p AS (
+  SELECT id, booking_id, status, amount, processed_at FROM public.payment WHERE booking_id={{ winner_booking_id | int }}
+), links AS (
+  SELECT booking_id, seat_id FROM public.booking_seat WHERE seat_id={{ seat_id | int }}
+)
+SELECT json_build_object(
+  'observed_at', clock_timestamp(),
+  'bookings', COALESCE((SELECT json_agg(b) FROM b), '[]'::json),
+  'booking_seats', COALESCE((SELECT json_agg(bs) FROM bs), '[]'::json),
+  'seats', COALESCE((SELECT json_agg(s) FROM s), '[]'::json),
+  'seat_links', COALESCE((SELECT json_agg(links) FROM links), '[]'::json),
+  'seat_link_count', (SELECT count(*) FROM links),
+  'payments', COALESCE((SELECT json_agg(p) FROM p), '[]'::json),
+  'ok', (
+    (SELECT count(*) FROM b) = 1
+    AND (SELECT count(*) FROM b WHERE user_id={{ winner_user_id | int }} AND event_id={{ event_id | int }}
+         AND status='{{ confirmed_booking_status | replace("'", "''") }}') = 1
+    AND (SELECT count(*) FROM bs) = 1
+    AND (SELECT count(*) FROM bs WHERE seat_id={{ seat_id | int }}) = 1
+    AND (SELECT count(*) FROM links) = 1
+    AND (SELECT count(*) FROM links WHERE booking_id={{ winner_booking_id | int }}) = 1
+    AND (SELECT count(*) FROM s WHERE event_id={{ event_id | int }}
+         AND status='{{ booked_seat_status | replace("'", "''") }}') = 1
+    AND (SELECT count(*) FROM p) = 1
+    AND (SELECT count(*) FROM p WHERE status='{{ approved_payment_status | replace("'", "''") }}'
+         AND processed_at IS NOT NULL) = 1
+  )
+);
+COMMIT;

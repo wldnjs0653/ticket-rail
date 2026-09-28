@@ -1,0 +1,284 @@
+name: Node.js CI/CD
+
+on:
+  workflow_dispatch:
+
+  push:
+    branches:
+      - main
+
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: node-cicd-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate Node.js API
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check JavaScript syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          while IFS= read -r -d '' file; do
+            echo "Checking ${file}"
+            node --check "${file}"
+          done < <(find src test -type f -name '*.js' -print0)
+
+      - name: Run automated tests
+        run: npm test --if-present
+
+      - name: Build container image for validation
+        run: docker build --tag ticketing-api:ci .
+
+      - name: Start container for smoke test
+        run: |
+          docker run \
+            --detach \
+            --name ticketing-api-ci \
+            --env SKIP_KAFKA_CONSUMERS=true \
+            --publish 127.0.0.1:3000:3000 \
+            ticketing-api:ci
+
+      - name: Verify health endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for attempt in {1..30}; do
+            if curl \
+              --fail \
+              --silent \
+              http://127.0.0.1:3000/healthz \
+              > /dev/null; then
+              echo "Health check passed."
+              exit 0
+            fi
+
+            sleep 2
+          done
+
+          echo "Health check failed."
+          docker logs ticketing-api-ci
+          exit 1
+
+      - name: Verify Prometheus metrics endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          curl \
+            --fail \
+            --silent \
+            http://127.0.0.1:3000/metrics \
+            > /dev/null
+
+          echo "Metrics check passed."
+
+      - name: Show container logs
+        if: always()
+        run: docker logs ticketing-api-ci || true
+
+      - name: Remove test container
+        if: always()
+        run: docker rm --force ticketing-api-ci || true
+
+  publish:
+    name: Publish image to GHCR
+    needs:
+      - validate
+
+    if: github.event_name != 'pull_request'
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      image_ref: ${{ steps.image.outputs.image_ref }}
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Calculate immutable image reference
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          IMAGE_NAME="$(
+            printf '%s' '${{ github.repository_owner }}/ticketing-api' \
+              | tr '[:upper:]' '[:lower:]'
+          )"
+
+          IMAGE_TAG="sha-${GITHUB_SHA::12}"
+          IMAGE_REF="ghcr.io/${IMAGE_NAME}:${IMAGE_TAG}"
+
+          echo "image_ref=${IMAGE_REF}" >> "${GITHUB_OUTPUT}"
+          echo "IMAGE_REF=${IMAGE_REF}" >> "${GITHUB_ENV}"
+
+          echo "Image: ${IMAGE_REF}"
+
+      - name: Log in to GHCR
+        shell: bash
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | docker login ghcr.io \
+                --username "${{ github.actor }}" \
+                --password-stdin
+
+      - name: Build immutable container image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          docker build \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --tag "${IMAGE_REF}" \
+            .
+
+      - name: Push image to GHCR
+        run: docker push "${IMAGE_REF}"
+
+      - name: Write image information
+        shell: bash
+        run: |
+          {
+            echo "## GHCR image published"
+            echo
+            echo "- Image: \`${IMAGE_REF}\`"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Log out from GHCR
+        if: always()
+        run: docker logout ghcr.io || true
+
+  deploy:
+    name: Deploy backend with Ansible
+    needs:
+      - publish
+
+    if: >-
+      ${{
+        (github.event_name == 'push' &&
+         github.ref == 'refs/heads/main') ||
+        (github.event_name == 'workflow_dispatch' &&
+         github.ref == 'refs/heads/main')
+      }}
+
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - ticketing-cd
+
+    timeout-minutes: 10
+
+    permissions:
+      contents: read
+
+    concurrency:
+      group: ticketing-backend-production
+      cancel-in-progress: false
+
+    env:
+      KUBECONFIG: /home/github-runner/.kube/config
+      BACKEND_IMAGE: ${{ needs.publish.outputs.image_ref }}
+      ANSIBLE_FORCE_COLOR: "0"
+
+    steps:
+      - name: Checkout deployment source
+        uses: actions/checkout@v7
+
+      - name: Verify Runner deployment access
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          command -v ansible-playbook
+          command -v kubectl
+          test -r "${KUBECONFIG}"
+
+          kubectl auth can-i \
+            get deployment/backend \
+            --namespace app
+
+          kubectl auth can-i \
+            patch deployment/backend \
+            --namespace app
+
+      - name: Validate the Ansible deployment playbook
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ansible-playbook \
+            ansible/deploy/backend.yml \
+            --syntax-check \
+            --extra-vars "backend_image=${BACKEND_IMAGE}"
+
+      - name: Deploy the immutable backend image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ansible-playbook \
+            ansible/deploy/backend.yml \
+            --extra-vars "backend_image=${BACKEND_IMAGE}"
+
+      - name: Show the resulting Kubernetes state
+        if: always()
+        shell: bash
+        run: |
+          kubectl \
+            --namespace app \
+            get deployment backend \
+            -o wide \
+            || true
+
+          kubectl \
+            --namespace app \
+            get pods \
+            --selector app=backend \
+            -o wide \
+            || true
+
+      - name: Write deployment information
+        if: success()
+        shell: bash
+        run: |
+          {
+            echo "## Kubernetes deployment completed"
+            echo
+            echo "- Deployment: \`app/backend\`"
+            echo "- Image: \`${BACKEND_IMAGE}\`"
+            echo "- Runner: \`ansible-controller-ticketing-cd\`"
+          } >> "${GITHUB_STEP_SUMMARY}"

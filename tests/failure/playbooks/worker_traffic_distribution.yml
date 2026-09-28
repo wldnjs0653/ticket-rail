@@ -1,0 +1,520 @@
+---
+- name: Measure Application Worker traffic distribution before and during failure
+  hosts: controller
+  gather_facts: false
+  any_errors_fatal: true
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+
+  vars:
+
+    traffic_phase_duration_seconds: 60
+    traffic_requests_per_second: 20
+    traffic_concurrency: 40
+    traffic_request_timeout_seconds: 3
+    transition_max_duration_seconds: 300
+
+    distribution_tolerance_percentage_points: 5
+    minimum_success_rate_percent: 99
+    minimum_node_identification_rate_percent: 99
+    failed_node_max_traffic_percent: 0.5
+
+    endpoint_failure_mode: auto
+    endpoint_auto_removal_timeout_seconds: 60
+    cleanup_probe_after_test: true
+
+    baseline_output: "{{ failure_test_run_dir }}/traffic-before.jsonl"
+    degraded_output: "{{ failure_test_run_dir }}/traffic-during.jsonl"
+    recovered_output: "{{ failure_test_run_dir }}/traffic-after.jsonl"
+    transition_output: "{{ failure_test_run_dir }}/traffic-transition.jsonl"
+    transition_stop_file: "{{ failure_test_run_dir }}/traffic-transition.stop"
+    result_json: "{{ failure_test_run_dir }}/worker-traffic-result.json"
+    result_markdown: "{{ failure_test_run_dir }}/worker-traffic-report.md"
+
+  pre_tasks:
+    - name: Capture one stable test run timestamp
+      ansible.builtin.command:
+        argv: [date, "+%Y%m%d-%H%M%S"]
+      register: stable_run_timestamp
+      changed_when: false
+
+    - name: Freeze the result directory for this play
+      ansible.builtin.set_fact:
+        failure_test_run_id: "worker-traffic-{{ stable_run_timestamp.stdout | trim }}"
+        failure_test_run_dir: "{{ results_root }}/worker-traffic-{{ stable_run_timestamp.stdout | trim }}"
+    - name: Require explicit approval for the disruptive test
+      ansible.builtin.assert:
+        that:
+          - confirm_disruptive_tests | default('NO') == 'YES'
+          - endpoint_failure_mode in ['auto', 'force_probe']
+        fail_msg: >-
+          이 Playbook은 Application Worker 서비스를 중지합니다.
+          -e confirm_disruptive_tests=YES 옵션이 필요하며
+          endpoint_failure_mode는 auto 또는 force_probe여야 합니다.
+
+    - name: Create result directory
+      ansible.builtin.file:
+        path: "{{ failure_test_run_dir }}"
+        state: directory
+        mode: "0750"
+
+    - name: Require all three Application Workers to be Ready
+      ansible.builtin.command:
+        argv:
+          - "{{ kubectl_bin }}"
+          - get
+          - node
+          - "{{ item }}"
+          - -o
+          - 'jsonpath={.status.conditions[?(@.type=="Ready")].status}'
+      loop: "{{ groups['application_workers'] }}"
+      register: worker_ready_precheck
+      changed_when: false
+      failed_when: worker_ready_precheck.stdout | trim != 'True'
+
+  tasks:
+    - name: Execute the traffic distribution failure test
+      block:
+        - name: Deploy one identifiable traffic probe per Application Worker
+          ansible.builtin.include_tasks: ../tasks/05_deploy_probe.yml
+
+        - name: Capture probe endpoints before the test
+          ansible.builtin.shell: |
+            set -euo pipefail
+            "{{ kubectl_bin }}" get endpointslice -n "{{ traffic_test_namespace }}"               -l "kubernetes.io/service-name={{ traffic_test_name }}"               -o jsonpath='{range .items[*].endpoints[*]}{.nodeName}={.conditions.ready}{"\n"}{end}'
+          args:
+            executable: /bin/bash
+          register: endpoints_before
+          changed_when: false
+
+        - name: Save endpoints before the test
+          ansible.builtin.copy:
+            dest: "{{ failure_test_run_dir }}/endpoints-before.txt"
+            mode: "0640"
+            content: "{{ endpoints_before.stdout }}\n"
+
+        - name: Measure traffic distribution before failure
+          ansible.builtin.command:
+            argv:
+              - "{{ python_bin }}"
+              - "{{ playbook_dir }}/../scripts/probe_distribution.py"
+              - --url
+              - "{{ traffic_test_url }}"
+              - --host-header
+              - "{{ traffic_test_host }}"
+              - --phase
+              - before
+              - --duration
+              - "{{ traffic_phase_duration_seconds | string }}"
+              - --rate
+              - "{{ traffic_requests_per_second | string }}"
+              - --concurrency
+              - "{{ traffic_concurrency | string }}"
+              - --timeout
+              - "{{ traffic_request_timeout_seconds | string }}"
+              - --output
+              - "{{ baseline_output }}"
+          changed_when: false
+
+        - name: Remove previous transition stop file
+          ansible.builtin.file:
+            path: "{{ transition_stop_file }}"
+            state: absent
+
+        - name: Start continuous traffic across the failure transition
+          ansible.builtin.command:
+            argv:
+              - "{{ python_bin }}"
+              - "{{ playbook_dir }}/../scripts/probe_distribution.py"
+              - --url
+              - "{{ traffic_test_url }}"
+              - --host-header
+              - "{{ traffic_test_host }}"
+              - --phase
+              - transition
+              - --duration
+              - "{{ transition_max_duration_seconds | string }}"
+              - --rate
+              - "{{ traffic_requests_per_second | string }}"
+              - --concurrency
+              - "{{ traffic_concurrency | string }}"
+              - --timeout
+              - "{{ traffic_request_timeout_seconds | string }}"
+              - --stop-file
+              - "{{ transition_stop_file }}"
+              - --output
+              - "{{ transition_output }}"
+          async: "{{ (transition_max_duration_seconds | int) + 60 }}"
+          poll: 0
+          register: transition_probe_job
+          changed_when: true
+
+        - name: Find the traffic probe Pod on the failure target
+          ansible.builtin.command:
+            argv:
+              - "{{ kubectl_bin }}"
+              - get
+              - pod
+              - -n
+              - "{{ traffic_test_namespace }}"
+              - -l
+              - "app.kubernetes.io/name={{ traffic_test_name }}"
+              - --field-selector
+              - "spec.nodeName={{ worker_failure_target }}"
+              - -o
+              - 'jsonpath={.items[0].metadata.name}'
+          register: failed_worker_probe_pod
+          changed_when: false
+          failed_when: failed_worker_probe_pod.stdout | trim == ''
+
+        - name: Prevent new Pods from scheduling on the failure target
+          ansible.builtin.command:
+            argv:
+              - "{{ kubectl_bin }}"
+              - cordon
+              - "{{ worker_failure_target }}"
+          register: worker_cordon
+          changed_when: "'cordoned' in worker_cordon.stdout"
+
+        - name: Stop kubelet on the failure target
+          ansible.builtin.systemd_service:
+            name: kubelet
+            state: stopped
+          delegate_to: "{{ worker_failure_target }}"
+          become: true
+
+        - name: Stop containerd on the failure target
+          ansible.builtin.systemd_service:
+            name: containerd
+            state: stopped
+          delegate_to: "{{ worker_failure_target }}"
+          become: true
+
+        - name: Wait until the failure target becomes NotReady
+          ansible.builtin.command:
+            argv:
+              - "{{ kubectl_bin }}"
+              - get
+              - node
+              - "{{ worker_failure_target }}"
+              - -o
+              - 'jsonpath={.status.conditions[?(@.type=="Ready")].status}'
+          register: worker_ready_during_failure
+          changed_when: false
+          failed_when: false
+          until: worker_ready_during_failure.stdout | trim != 'True'
+          retries: "{{ (node_notready_timeout_seconds / 2) | int }}"
+          delay: 2
+
+        - name: Wait for automatic removal of the failed Worker endpoint
+          ansible.builtin.shell: |
+            set -uo pipefail
+            deadline=$((SECONDS + {{ endpoint_auto_removal_timeout_seconds | int }}))
+            while (( SECONDS < deadline )); do
+              state=$("{{ kubectl_bin }}" get endpointslice -n "{{ traffic_test_namespace }}"                 -l "kubernetes.io/service-name={{ traffic_test_name }}"                 -o jsonpath='{range .items[*].endpoints[*]}{.nodeName}={.conditions.ready}{"\n"}{end}')
+              printf '%s\n' "$state"
+              if ! printf '%s\n' "$state" | grep -Eq '^{{ worker_failure_target }}=(true)?$'; then
+                exit 0
+              fi
+              sleep 2
+            done
+            exit 1
+          args:
+            executable: /bin/bash
+          register: automatic_endpoint_removal
+          changed_when: false
+          failed_when: false
+
+        - name: Stop when strict automatic endpoint removal did not occur
+          ansible.builtin.fail:
+            msg: >-
+              {{ worker_failure_target }}가 NotReady가 되었지만
+              {{ endpoint_auto_removal_timeout_seconds }}초 안에 Service Endpoint에서 제거되지 않았습니다.
+              kubelet과 containerd 중지만으로 실행 중인 컨테이너가 종료되지 않았을 수 있습니다.
+              엄격한 자동 장애조치 결과는 FAIL입니다.
+              Service 분산 동작만 추가 검증하려면
+              -e endpoint_failure_mode=force_probe로 다시 실행하십시오.
+          when:
+            - automatic_endpoint_removal.rc != 0
+            - endpoint_failure_mode == 'auto'
+
+        - name: Force-delete only the isolated probe Pod when requested
+          ansible.builtin.command:
+            argv:
+              - "{{ kubectl_bin }}"
+              - delete
+              - pod
+              - "{{ failed_worker_probe_pod.stdout | trim }}"
+              - -n
+              - "{{ traffic_test_namespace }}"
+              - --grace-period=0
+              - --force
+              - --wait=false
+          when:
+            - automatic_endpoint_removal.rc != 0
+            - endpoint_failure_mode == 'force_probe'
+          changed_when: true
+
+        - name: Record how the failed endpoint was removed
+          ansible.builtin.set_fact:
+            endpoint_removal_result: >-
+              {{
+                'automatic'
+                if automatic_endpoint_removal.rc == 0
+                else 'forced_probe_pod_delete'
+              }}
+
+        - name: Wait until the failed Worker is absent from ready endpoints
+          ansible.builtin.shell: |
+            set -euo pipefail
+            state=$("{{ kubectl_bin }}" get endpointslice -n "{{ traffic_test_namespace }}"               -l "kubernetes.io/service-name={{ traffic_test_name }}"               -o jsonpath='{range .items[*].endpoints[*]}{.nodeName}={.conditions.ready}{"\n"}{end}')
+            printf '%s\n' "$state"
+            ! printf '%s\n' "$state" | grep -Eq '^{{ worker_failure_target }}=(true)?$'
+          args:
+            executable: /bin/bash
+          register: endpoints_during
+          changed_when: false
+          retries: 30
+          delay: 2
+          until: endpoints_during.rc == 0
+
+        - name: Save endpoints during failure
+          ansible.builtin.copy:
+            dest: "{{ failure_test_run_dir }}/endpoints-during.txt"
+            mode: "0640"
+            content: "{{ endpoints_during.stdout }}\n"
+
+        - name: Measure traffic distribution during failure
+          ansible.builtin.command:
+            argv:
+              - "{{ python_bin }}"
+              - "{{ playbook_dir }}/../scripts/probe_distribution.py"
+              - --url
+              - "{{ traffic_test_url }}"
+              - --host-header
+              - "{{ traffic_test_host }}"
+              - --phase
+              - during
+              - --duration
+              - "{{ traffic_phase_duration_seconds | string }}"
+              - --rate
+              - "{{ traffic_requests_per_second | string }}"
+              - --concurrency
+              - "{{ traffic_concurrency | string }}"
+              - --timeout
+              - "{{ traffic_request_timeout_seconds | string }}"
+              - --output
+              - "{{ degraded_output }}"
+          changed_when: false
+
+        - name: Start containerd on the failure target
+          ansible.builtin.systemd_service:
+            name: containerd
+            state: started
+            enabled: true
+          delegate_to: "{{ worker_failure_target }}"
+          become: true
+
+        - name: Start kubelet on the failure target
+          ansible.builtin.systemd_service:
+            name: kubelet
+            state: started
+            enabled: true
+          delegate_to: "{{ worker_failure_target }}"
+          become: true
+
+        - name: Allow scheduling on the recovered Worker
+          ansible.builtin.command:
+            argv:
+              - "{{ kubectl_bin }}"
+              - uncordon
+              - "{{ worker_failure_target }}"
+          register: worker_uncordon
+          changed_when: "'uncordoned' in worker_uncordon.stdout"
+
+        - name: Wait for the Worker to become Ready
+          ansible.builtin.command:
+            argv:
+              - "{{ kubectl_bin }}"
+              - wait
+              - --for=condition=Ready
+              - "node/{{ worker_failure_target }}"
+              - "--timeout={{ node_ready_timeout_seconds }}s"
+          changed_when: false
+
+        - name: Wait for all three traffic probe Pods after recovery
+          ansible.builtin.command:
+            argv:
+              - "{{ kubectl_bin }}"
+              - rollout
+              - status
+              - "deployment/{{ traffic_test_name }}"
+              - -n
+              - "{{ traffic_test_namespace }}"
+              - --timeout=300s
+          changed_when: false
+
+        - name: Capture probe endpoints after recovery
+          ansible.builtin.shell: |
+            set -euo pipefail
+            "{{ kubectl_bin }}" get endpointslice -n "{{ traffic_test_namespace }}"               -l "kubernetes.io/service-name={{ traffic_test_name }}"               -o jsonpath='{range .items[*].endpoints[*]}{.nodeName}={.conditions.ready}{"\n"}{end}'
+          args:
+            executable: /bin/bash
+          register: endpoints_after
+          changed_when: false
+
+        - name: Save endpoints after recovery
+          ansible.builtin.copy:
+            dest: "{{ failure_test_run_dir }}/endpoints-after.txt"
+            mode: "0640"
+            content: "{{ endpoints_after.stdout }}\n"
+
+        - name: Measure traffic distribution after recovery
+          ansible.builtin.command:
+            argv:
+              - "{{ python_bin }}"
+              - "{{ playbook_dir }}/../scripts/probe_distribution.py"
+              - --url
+              - "{{ traffic_test_url }}"
+              - --host-header
+              - "{{ traffic_test_host }}"
+              - --phase
+              - after
+              - --duration
+              - "{{ traffic_phase_duration_seconds | string }}"
+              - --rate
+              - "{{ traffic_requests_per_second | string }}"
+              - --concurrency
+              - "{{ traffic_concurrency | string }}"
+              - --timeout
+              - "{{ traffic_request_timeout_seconds | string }}"
+              - --output
+              - "{{ recovered_output }}"
+          changed_when: false
+
+        - name: Stop continuous transition traffic
+          ansible.builtin.file:
+            path: "{{ transition_stop_file }}"
+            state: touch
+            mode: "0640"
+
+        - name: Wait for continuous transition traffic to finish
+          ansible.builtin.async_status:
+            jid: "{{ transition_probe_job.ansible_job_id }}"
+          register: transition_probe_status
+          until: transition_probe_status.finished
+          retries: 30
+          delay: 1
+          changed_when: false
+
+        - name: Analyze distribution, success rate, and latency
+          ansible.builtin.command:
+            argv:
+              - "{{ python_bin }}"
+              - "{{ playbook_dir }}/../scripts/analyze_distribution.py"
+              - --baseline
+              - "{{ baseline_output }}"
+              - --degraded
+              - "{{ degraded_output }}"
+              - --recovered
+              - "{{ recovered_output }}"
+              - --transition
+              - "{{ transition_output }}"
+              - --nodes
+              - "{{ groups['application_workers'] | join(',') }}"
+              - --failed-node
+              - "{{ worker_failure_target }}"
+              - --tolerance-pp
+              - "{{ distribution_tolerance_percentage_points | string }}"
+              - --failed-node-max-percent
+              - "{{ failed_node_max_traffic_percent | string }}"
+              - --min-success-rate
+              - "{{ minimum_success_rate_percent | string }}"
+              - --min-node-identification-rate
+              - "{{ minimum_node_identification_rate_percent | string }}"
+              - --endpoint-removal-mode
+              - "{{ endpoint_removal_result }}"
+              - --json-output
+              - "{{ result_json }}"
+              - --markdown-output
+              - "{{ result_markdown }}"
+          register: traffic_distribution_analysis
+          changed_when: false
+
+        - name: Print traffic distribution result
+          ansible.builtin.debug:
+            msg:
+              - "Result directory: {{ failure_test_run_dir }}"
+              - "Markdown report: {{ result_markdown }}"
+              - "JSON result: {{ result_json }}"
+              - "Result: {{ (traffic_distribution_analysis.stdout | from_json).status }}"
+
+      rescue:
+        - name: Save blocked or failed test reason
+          ansible.builtin.copy:
+            dest: "{{ failure_test_run_dir }}/worker-traffic-report.md"
+            mode: "0640"
+            content: |
+              # Application Worker Traffic Distribution Test
+
+              - Result: **BLOCKED_OR_FAILED**
+              - Failed task: {{ ansible_failed_task.name | default('unknown') }}
+              - Reason: {{ ansible_failed_result.msg | default(ansible_failed_result.stderr | default('unknown')) }}
+
+              Review the endpoint evidence and raw JSONL files in this directory.
+
+        - name: Print failure location
+          ansible.builtin.debug:
+            msg:
+              - "Test did not complete."
+              - "Evidence: {{ failure_test_run_dir }}"
+
+      always:
+        - name: Ensure containerd is running on the failure target
+          ansible.builtin.systemd_service:
+            name: containerd
+            state: started
+            enabled: true
+          delegate_to: "{{ worker_failure_target }}"
+          become: true
+          failed_when: false
+
+        - name: Ensure kubelet is running on the failure target
+          ansible.builtin.systemd_service:
+            name: kubelet
+            state: started
+            enabled: true
+          delegate_to: "{{ worker_failure_target }}"
+          become: true
+          failed_when: false
+
+        - name: Ensure the failure target is uncordoned
+          ansible.builtin.command:
+            argv:
+              - "{{ kubectl_bin }}"
+              - uncordon
+              - "{{ worker_failure_target }}"
+          changed_when: false
+          failed_when: false
+
+        - name: Stop transition traffic if it is still running
+          ansible.builtin.file:
+            path: "{{ transition_stop_file }}"
+            state: touch
+            mode: "0640"
+          when: transition_probe_job is defined
+
+        - name: Wait briefly for transition traffic cleanup
+          ansible.builtin.async_status:
+            jid: "{{ transition_probe_job.ansible_job_id }}"
+          register: transition_cleanup_status
+          until: transition_cleanup_status.finished
+          retries: 15
+          delay: 1
+          changed_when: false
+          failed_when: false
+          when: transition_probe_job is defined
+
+        - name: Remove the isolated traffic probe
+          ansible.builtin.include_tasks: ../tasks/95_cleanup_probe.yml
+          when: cleanup_probe_after_test | bool

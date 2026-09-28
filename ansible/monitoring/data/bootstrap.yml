@@ -1,0 +1,228 @@
+---
+- name: Bootstrap the Ansible Controller for Kubernetes deployments
+  hosts: localhost
+  connection: local
+  become: true
+  gather_facts: true
+  vars_files:
+    - vars/main.yml
+  vars:
+    collection_install_path: "{{ playbook_dir }}/collections"
+    controller_venv: /opt/ticket-rail-venv
+    helm_arch_map:
+      x86_64: amd64
+      aarch64: arm64
+    helm_sha256:
+      amd64: c306b46f719b0a4da32d0f78ee21bf90ce8d602f15b22ab753f0674d1670a7f3
+      arm64: 564de2191b881e9f71b5606b25345821ea1682f06ab90499d3ab22b530176da1
+
+  tasks:
+    - name: Require a supported Controller CPU architecture
+      ansible.builtin.assert:
+        that:
+          - ansible_architecture in helm_arch_map
+        fail_msg: "Unsupported Controller architecture: {{ ansible_architecture }}"
+
+    - name: Install Controller operating-system prerequisites
+      ansible.builtin.dnf:
+        name:
+          - python3.11
+          - python3.11-pip
+          - tar
+          - gzip
+          - curl
+        state: present
+
+    - name: Create the dedicated Kubernetes Python virtual environment
+      ansible.builtin.command:
+        argv:
+          - python3.11
+          - -m
+          - venv
+          - "{{ controller_venv }}"
+        creates: "{{ controller_venv }}/bin/python"
+
+    - name: Install Kubernetes Python dependencies in the dedicated environment
+      ansible.builtin.pip:
+        executable: "{{ controller_venv }}/bin/pip"
+        name:
+          - "ansible-core=={{ ansible_core_version }}"
+          - kubernetes>=24.2.0
+          - PyYAML>=3.11
+          - jsonpatch
+        state: present
+
+    - name: Create the playbook-adjacent collection directory
+      ansible.builtin.file:
+        path: "{{ collection_install_path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Install the pinned kubernetes.core collection beside the playbooks
+      ansible.builtin.command:
+        argv:
+          - "{{ controller_venv }}/bin/ansible-galaxy"
+          - collection
+          - install
+          - -r
+          - "{{ playbook_dir }}/requirements.yml"
+          - -p
+          - "{{ collection_install_path }}"
+          - --force
+      register: collection_install
+      changed_when: "'was installed successfully' in collection_install.stdout"
+
+    - name: Verify kubernetes.core is really installed
+      ansible.builtin.command:
+        argv:
+          - "{{ controller_venv }}/bin/ansible-galaxy"
+          - collection
+          - list
+          - -p
+          - "{{ collection_install_path }}"
+          - kubernetes.core
+      register: collection_list
+      changed_when: false
+
+    - name: Require the pinned kubernetes.core version
+      ansible.builtin.assert:
+        that:
+          - "'kubernetes.core' in collection_list.stdout"
+          - "kubernetes_core_version in collection_list.stdout"
+        fail_msg: >-
+          kubernetes.core {{ kubernetes_core_version }} was not found under
+          {{ collection_install_path }}. Review the ansible-galaxy output above.
+
+    - name: Check whether Helm is already the requested version
+      ansible.builtin.command:
+        argv:
+          - "{{ helm_binary }}"
+          - version
+          - --short
+      register: installed_helm
+      changed_when: false
+      failed_when: false
+
+    - name: Install the pinned Helm binary
+      when: installed_helm.rc != 0 or helm_version not in installed_helm.stdout
+      block:
+        - name: Create the versioned Helm staging directory
+          ansible.builtin.file:
+            path: "/opt/helm-{{ helm_version }}"
+            state: directory
+            owner: root
+            group: root
+            mode: '0755'
+
+        - name: Download the official Helm archive with checksum verification
+          ansible.builtin.get_url:
+            url: >-
+              https://get.helm.sh/helm-{{ helm_version }}-linux-{{ helm_arch_map[ansible_architecture] }}.tar.gz
+            dest: "/opt/helm-{{ helm_version }}/helm.tar.gz"
+            checksum: "sha256:{{ helm_sha256[helm_arch_map[ansible_architecture]] }}"
+            owner: root
+            group: root
+            mode: '0644'
+
+        - name: Extract Helm
+          ansible.builtin.unarchive:
+            src: "/opt/helm-{{ helm_version }}/helm.tar.gz"
+            dest: "/opt/helm-{{ helm_version }}"
+            remote_src: true
+            creates: >-
+              /opt/helm-{{ helm_version }}/linux-{{ helm_arch_map[ansible_architecture] }}/helm
+
+        - name: Install Helm into the system path
+          ansible.builtin.copy:
+            src: >-
+              /opt/helm-{{ helm_version }}/linux-{{ helm_arch_map[ansible_architecture] }}/helm
+            dest: "{{ helm_binary }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: '0755'
+
+    - name: Create the kubeconfig directory
+      ansible.builtin.file:
+        path: /root/.kube
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Check for an existing Controller kubeconfig
+      ansible.builtin.stat:
+        path: "{{ controller_kubeconfig }}"
+      register: kubeconfig_stat
+
+    - name: Copy admin kubeconfig from master1 when the Controller has none
+      when: not kubeconfig_stat.stat.exists
+      block:
+        - name: Read kubeconfig from master1
+          ansible.builtin.slurp:
+            src: /etc/kubernetes/admin.conf
+          delegate_to: master1
+          register: master_kubeconfig
+          no_log: true
+
+        - name: Save kubeconfig on the Ansible Controller
+          ansible.builtin.copy:
+            content: "{{ master_kubeconfig.content | b64decode }}"
+            dest: "{{ controller_kubeconfig }}"
+            owner: root
+            group: root
+            mode: '0600'
+          no_log: true
+
+    - name: Enforce safe kubeconfig ownership and permissions
+      ansible.builtin.file:
+        path: "{{ controller_kubeconfig }}"
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Verify Helm
+      ansible.builtin.command:
+        argv:
+          - "{{ helm_binary }}"
+          - version
+          - --short
+      register: helm_result
+      changed_when: false
+
+    - name: Verify the dedicated Ansible runtime
+      ansible.builtin.command:
+        argv:
+          - "{{ controller_venv }}/bin/ansible-playbook"
+          - --version
+      register: dedicated_ansible
+      changed_when: false
+
+    - name: Verify Kubernetes API access through the Controller kubeconfig
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - get
+          - --raw=/readyz
+      register: api_ready
+      changed_when: false
+
+    - name: Check the dedicated Python interpreter
+      ansible.builtin.stat:
+        path: "{{ controller_python }}"
+      register: controller_python_stat
+
+    - name: Require all Controller prerequisites
+      ansible.builtin.assert:
+        that:
+          - helm_version in helm_result.stdout
+          - ansible_core_version in dedicated_ansible.stdout
+          - api_ready.stdout | trim == 'ok'
+          - controller_python_stat.stat.exists
+        success_msg: >-
+          Controller bootstrap complete: ansible-core {{ ansible_core_version }}, Helm {{ helm_version }},
+          kubernetes.core {{ kubernetes_core_version }}, kubeconfig, Python SDK,
+          and Kubernetes API access are ready.

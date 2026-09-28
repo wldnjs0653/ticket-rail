@@ -1,0 +1,22 @@
+---
+- name: Configure Monitoring local storage on Workers
+  hosts: workers
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Configure Monitoring Worker storage
+      ansible.builtin.include_role:
+        name: storage
+        tasks_from: monitoring-worker.yml
+
+- name: Configure Monitoring Kubernetes Local PVs
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    - name: Configure Monitoring Kubernetes PVs
+      ansible.builtin.include_role:
+        name: storage
+        tasks_from: monitoring-k8s-pv.yml

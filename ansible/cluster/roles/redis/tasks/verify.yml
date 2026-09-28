@@ -1,0 +1,20 @@
+---
+- name: Test authenticated Redis PING
+  ansible.builtin.command:
+    argv:
+      - redis-cli
+      - --user
+      - "{{ redis_username }}"
+      - PING
+  environment:
+    REDISCLI_AUTH: "{{ redis_password }}"
+  register: redis_ping_result
+  changed_when: false
+  no_log: true
+
+- name: Verify authenticated Redis PING
+  ansible.builtin.assert:
+    that:
+      - redis_ping_result.stdout == "PONG"
+    fail_msg: "Authenticated Redis PING failed."
+    success_msg: "Authenticated Redis PING succeeded."

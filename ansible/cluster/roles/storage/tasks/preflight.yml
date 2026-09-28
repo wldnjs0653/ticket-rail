@@ -1,0 +1,300 @@
+---
+# ============================================================
+# 1. Data 디스크 크기 기준 계산
+# ============================================================
+
+- name: Calculate expected data disk size
+  ansible.builtin.set_fact:
+    storage_target_bytes: >-
+      {{
+        (storage_disk_size_gib | int)
+        * 1024 * 1024 * 1024
+      }}
+    storage_disk_tolerance_bytes: >-
+      {{
+        (storage_disk_size_tolerance_gib | int)
+        * 1024 * 1024 * 1024
+      }}
+
+
+# ============================================================
+# 2. OS root filesystem의 실제 backing disk 확인
+# ============================================================
+
+- name: Detect root backing disk
+  ansible.builtin.shell: |
+    set -o pipefail
+
+    root_source=$(findmnt -n -o SOURCE /)
+
+    lsblk -s -n -o PATH,TYPE "$root_source" |
+    awk '$2 == "disk" { print $1; exit }'
+  args:
+    executable: /bin/bash
+  register: storage_root_disk
+  changed_when: false
+
+- name: Verify root backing disk was detected
+  ansible.builtin.assert:
+    that:
+      - storage_root_disk.stdout | trim | length > 0
+    fail_msg: >-
+      중단: OS root filesystem의 backing disk를 확인하지 못했습니다.
+      안전을 위해 Data 디스크 작업을 진행하지 않습니다.
+
+
+# ============================================================
+# 3. Data 디스크 자동 탐지
+#    - 설정된 용량 범위
+#    - TYPE=disk
+#    - OS root disk 제외
+# ============================================================
+
+- name: Find candidate data disks
+  ansible.builtin.shell: |
+    set -o pipefail
+
+    min_size=$(( {{ storage_target_bytes }} - {{ storage_disk_tolerance_bytes }} ))
+    max_size=$(( {{ storage_target_bytes }} + {{ storage_disk_tolerance_bytes }} ))
+    root_disk="{{ storage_root_disk.stdout | trim }}"
+
+    lsblk -b -dn -o PATH,SIZE,TYPE |
+    awk \
+      -v min="$min_size" \
+      -v max="$max_size" \
+      -v root="$root_disk" \
+      '$3 == "disk" && $2 >= min && $2 <= max && $1 != root { print $1 }'
+  args:
+    executable: /bin/bash
+  register: storage_disk_candidates
+  changed_when: false
+
+- name: Verify exactly one data disk was found
+  ansible.builtin.assert:
+    that:
+      - storage_disk_candidates.stdout_lines | length == 1
+    fail_msg: >-
+      중단: {{ storage_disk_size_gib }}GiB급 Data 디스크를 정확히 1개
+      찾을 수 없습니다.
+      root_disk={{ storage_root_disk.stdout | trim }}
+      candidates={{ storage_disk_candidates.stdout_lines }}
+
+- name: Set detected data disk
+  ansible.builtin.set_fact:
+    storage_device: "{{ storage_disk_candidates.stdout_lines[0] }}"
+
+
+# ============================================================
+# 4. 선택된 Data 디스크 기본 안전성 확인
+# ============================================================
+
+- name: Check target storage device
+  ansible.builtin.stat:
+    path: "{{ storage_device }}"
+  register: storage_device_stat
+
+- name: Verify target is a block device
+  ansible.builtin.assert:
+    that:
+      - storage_device_stat.stat.exists
+      - storage_device_stat.stat.isblk | default(false)
+    fail_msg: >-
+      중단: {{ storage_device }}가 존재하지 않거나
+      block device가 아닙니다.
+
+- name: Read storage device information
+  ansible.builtin.command:
+    argv:
+      - lsblk
+      - -bdno
+      - TYPE,SIZE
+      - "{{ storage_device }}"
+  register: storage_device_info
+  changed_when: false
+
+- name: Verify detected data disk
+  ansible.builtin.assert:
+    that:
+      - storage_device_info.stdout.split()[0] == "disk"
+      - (storage_device_info.stdout.split()[1] | int) >=
+        ((storage_target_bytes | int) - (storage_disk_tolerance_bytes | int))
+      - (storage_device_info.stdout.split()[1] | int) <=
+        ((storage_target_bytes | int) + (storage_disk_tolerance_bytes | int))
+    fail_msg: >-
+      중단: {{ storage_device }}가 예상한
+      {{ storage_disk_size_gib }}GiB급 Data 디스크가 아닙니다.
+      actual={{ storage_device_info.stdout }}
+
+
+# ============================================================
+# 5. 파티션 device 이름 생성
+#    예:
+#      /dev/sdb      -> /dev/sdb1
+#      /dev/nvme0n1 -> /dev/nvme0n1p1
+# ============================================================
+
+- name: Determine partition device separator
+  ansible.builtin.set_fact:
+    storage_partition_separator: >-
+      {{
+        'p'
+        if storage_device is search('[0-9]$')
+        else ''
+      }}
+
+- name: Build data partition device map
+  ansible.builtin.set_fact:
+    storage_partition_devices: >-
+      {{
+        storage_partition_devices | default({}) |
+        combine({
+          item.name:
+            storage_device
+            ~ storage_partition_separator
+            ~ (item.number | string)
+        })
+      }}
+  loop: "{{ storage_partitions }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+
+# ============================================================
+# 6. 기존 파티션 상태 확인
+#    신규 상태: 0개
+#    구축 완료: storage_partitions 개수
+# ============================================================
+
+- name: Count existing partitions
+  ansible.builtin.shell: |
+    lsblk -ln -o TYPE "{{ storage_device }}" |
+    grep -c '^part$' || true
+  args:
+    executable: /bin/bash
+  register: storage_partition_count
+  changed_when: false
+
+- name: Verify partition state
+  ansible.builtin.assert:
+    that:
+      - (storage_partition_count.stdout | int) in
+        [0, (storage_partitions | length)]
+    fail_msg: >-
+      중단: 예상하지 못한 파티션 구성이 발견되었습니다.
+      expected=0 or {{ storage_partitions | length }}
+      actual={{ storage_partition_count.stdout }}
+
+
+# ============================================================
+# 7. 이미 구축된 경우 Data 파티션 존재 여부 확인
+# ============================================================
+
+- name: Check expected data partitions
+  ansible.builtin.stat:
+    path: "{{ storage_partition_devices[item.name] }}"
+  loop: "{{ storage_partitions }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: storage_data_partitions
+  when:
+    - (storage_partition_count.stdout | int) ==
+      (storage_partitions | length)
+
+- name: Verify expected data partitions exist
+  ansible.builtin.assert:
+    that:
+      - result.stat.exists
+      - result.stat.isblk | default(false)
+    fail_msg: >-
+      중단: 기존 파티션 구성이 예상한 Data Storage 구조와
+      일치하지 않습니다.
+      path={{ storage_partition_devices[result.item.name] }}
+  loop: "{{ storage_data_partitions.results }}"
+  loop_control:
+    loop_var: result
+    label: "{{ result.item.name }}"
+  when:
+    - (storage_partition_count.stdout | int) ==
+      (storage_partitions | length)
+
+
+# ============================================================
+# 8. 기존 Data 파티션 크기 확인
+#    defaults의 capacity 값을 기준으로 검증
+# ============================================================
+
+- name: Read existing data partition sizes
+  ansible.builtin.command:
+    argv:
+      - lsblk
+      - -bdno
+      - SIZE
+      - "{{ storage_partition_devices[item.name] }}"
+  loop: "{{ storage_partitions }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: storage_data_partition_sizes
+  changed_when: false
+  when:
+    - (storage_partition_count.stdout | int) ==
+      (storage_partitions | length)
+
+- name: Verify existing data partition sizes
+  ansible.builtin.assert:
+    that:
+      - (result.stdout | int) >=
+        ((expected_partition_bytes | int) - (partition_tolerance_bytes | int))
+      - (result.stdout | int) <=
+        ((expected_partition_bytes | int) + (partition_tolerance_bytes | int))
+    fail_msg: >-
+      중단: {{ result.item.name }} 파티션 크기가
+      예상한 Data Storage 구조와 일치하지 않습니다.
+      device={{ storage_partition_devices[result.item.name] }}
+      expected={{ result.item.capacity }}
+      actual={{ result.stdout }} bytes
+  vars:
+    expected_partition_bytes: >-
+      {{
+        (
+          result.item.capacity
+          | regex_replace('Gi$', '')
+          | int
+        )
+        * 1024 * 1024 * 1024
+      }}
+    partition_tolerance_bytes: >-
+      {{
+        (storage_partition_size_tolerance_mib | int)
+        * 1024 * 1024
+      }}
+  loop: "{{ storage_data_partition_sizes.results }}"
+  loop_control:
+    loop_var: result
+    label: "{{ result.item.name }}"
+  when:
+    - (storage_partition_count.stdout | int) ==
+      (storage_partitions | length)
+
+
+# ============================================================
+# 9. 전체 Data 디스크 자체가 직접 mount된 상태인지 확인
+# ============================================================
+
+- name: Check whether whole data disk is mounted directly
+  ansible.builtin.shell: |
+    if findmnt -rn -S "{{ storage_device }}" >/dev/null; then
+      echo MOUNTED
+    else
+      echo UNMOUNTED
+    fi
+  args:
+    executable: /bin/bash
+  register: storage_whole_disk_mount
+  changed_when: false
+
+- name: Stop if whole data disk is mounted directly
+  ansible.builtin.assert:
+    that:
+      - storage_whole_disk_mount.stdout | trim == "UNMOUNTED"
+    fail_msg: >-
+      중단: {{ storage_device }} 전체 디스크가 직접 마운트되어 있습니다.

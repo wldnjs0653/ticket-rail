@@ -1,0 +1,6 @@
+---
+- ansible.builtin.import_playbook: test.yml
+- ansible.builtin.import_playbook: build-images.yml
+- ansible.builtin.import_playbook: distribute-images.yml
+- ansible.builtin.import_playbook: deploy-k8s.yml
+- ansible.builtin.import_playbook: validate-k8s.yml

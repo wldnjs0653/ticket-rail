@@ -1,0 +1,11 @@
+---
+- name: Configure Kubernetes Data Local PV
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    storage_mode: kubernetes
+
+  roles:
+    - role: storage

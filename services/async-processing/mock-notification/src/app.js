@@ -1,0 +1,93 @@
+import { createHash, randomUUID } from 'node:crypto';
+import express from 'express';
+
+const supportedChannels = new Set(['EMAIL', 'SMS']);
+
+function defaultIdFactory(idempotencyKey) {
+  if (!idempotencyKey) return randomUUID();
+  const digest = createHash('sha256').update(idempotencyKey).digest('hex').slice(0, 24);
+  return `notification-${digest}`;
+}
+
+function hasValue(value) {
+  return value !== undefined && value !== null && String(value).trim() !== '';
+}
+
+function validateNotificationRequest(body) {
+  const errors = [];
+
+  if (!hasValue(body.booking_id)) {
+    errors.push('booking_id is required');
+  }
+
+  if (!hasValue(body.user_id)) {
+    errors.push('user_id is required');
+  }
+
+  const channel = typeof body.channel === 'string' ? body.channel.toUpperCase() : '';
+  if (!supportedChannels.has(channel)) {
+    errors.push('channel must be EMAIL or SMS');
+  }
+
+  if (!hasValue(body.message)) {
+    errors.push('message is required');
+  } else if (String(body.message).length > 1000) {
+    errors.push('message must be 1000 characters or fewer');
+  }
+
+  return errors;
+}
+
+export function createApp({ idFactory = defaultIdFactory, now = () => new Date() } = {}) {
+  const app = express();
+
+  app.disable('x-powered-by');
+  app.use(express.json({ limit: '32kb' }));
+
+  app.get('/health/live', (_request, response) => {
+    response.status(200).json({ status: 'UP' });
+  });
+
+  app.get('/health/ready', (_request, response) => {
+    response.status(200).json({ status: 'READY' });
+  });
+
+  app.post('/notifications', (request, response) => {
+    const body = request.body ?? {};
+    const errors = validateNotificationRequest(body);
+
+    if (errors.length > 0) {
+      return response.status(400).json({
+        code: 'INVALID_NOTIFICATION_REQUEST',
+        message: 'The notification request is invalid.',
+        errors,
+      });
+    }
+
+    return response.status(200).json({
+      notification_id: idFactory(request.get('idempotency-key')),
+      booking_id: body.booking_id,
+      user_id: body.user_id,
+      channel: body.channel.toUpperCase(),
+      status: 'SENT',
+      sent_at: now().toISOString(),
+    });
+  });
+
+  app.use((error, _request, response, _next) => {
+    if (error instanceof SyntaxError && 'body' in error) {
+      return response.status(400).json({
+        code: 'INVALID_JSON',
+        message: 'The request body must be valid JSON.',
+      });
+    }
+
+    console.error(error);
+    return response.status(500).json({
+      code: 'INTERNAL_ERROR',
+      message: 'An unexpected error occurred.',
+    });
+  });
+
+  return app;
+}

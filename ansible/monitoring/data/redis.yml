@@ -1,0 +1,626 @@
+---
+- name: Deploy and verify three-node Redis Sentinel HA from start to finish
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/main.yml
+  vars:
+    ansible_python_interpreter: "{{ controller_python }}"
+
+  pre_tasks:
+    - name: Run shared Kubernetes and storage checks
+      ansible.builtin.include_tasks: tasks/cluster_prerequisites.yml
+      vars:
+        required_storage_class_names:
+          - "{{ redis_storage_class_name }}"
+
+    - name: Read an existing Redis password Secret
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        api_version: v1
+        kind: Secret
+        namespace: "{{ data_namespace }}"
+        name: redis-auth
+      register: existing_redis_secret
+      no_log: true
+
+    - name: Generate or reuse the Redis password
+      ansible.builtin.set_fact:
+        redis_password: >-
+          {{ (existing_redis_secret.resources[0].data.password | b64decode)
+          if existing_redis_secret.resources | length == 1
+          else lookup('ansible.builtin.password', playbook_dir
+          + '/.secrets/redis-password length=32 chars=ascii_letters,digits') }}
+      no_log: true
+
+  tasks:
+    - name: Create the Redis authentication Secret
+      kubernetes.core.k8s:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        state: present
+        apply: true
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: redis-auth
+            namespace: "{{ data_namespace }}"
+            labels:
+              app.kubernetes.io/name: redis
+              app.kubernetes.io/part-of: ticketing-platform
+          type: Opaque
+          stringData:
+            password: "{{ redis_password }}"
+      no_log: true
+
+    - name: Create Redis and Sentinel bootstrap configuration
+      kubernetes.core.k8s:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        state: present
+        apply: true
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: redis-ha-config
+            namespace: "{{ data_namespace }}"
+            labels:
+              app.kubernetes.io/name: redis
+              app.kubernetes.io/part-of: ticketing-platform
+          data:
+            redis.conf.template: |
+              bind 0.0.0.0
+              port 6379
+              protected-mode yes
+              requirepass __REDIS_PASSWORD__
+              masterauth __REDIS_PASSWORD__
+              appendonly yes
+              appendfsync everysec
+              aof-use-rdb-preamble yes
+              dir /data
+              dbfilename dump.rdb
+              replica-read-only yes
+              replica-priority 100
+              min-replicas-to-write 1
+              min-replicas-max-lag 10
+              maxmemory-policy noeviction
+              timeout 0
+              tcp-keepalive 300
+            sentinel.conf.template: |
+              bind 0.0.0.0
+              port 26379
+              protected-mode yes
+              requirepass __REDIS_PASSWORD__
+              dir /tmp
+              sentinel resolve-hostnames yes
+              sentinel announce-hostnames yes
+              sentinel monitor __MASTER_NAME__ __INITIAL_MASTER__ 6379 __QUORUM__
+              sentinel auth-pass __MASTER_NAME__ __REDIS_PASSWORD__
+              sentinel down-after-milliseconds __MASTER_NAME__ __DOWN_AFTER_MS__
+              sentinel failover-timeout __MASTER_NAME__ __FAILOVER_TIMEOUT_MS__
+              sentinel parallel-syncs __MASTER_NAME__ 1
+            prepare.sh: |
+              #!/bin/sh
+              set -eu
+
+              pod_ordinal="${HOSTNAME##*-}"
+              namespace="${POD_NAMESPACE}"
+              initial_master="redis-0.redis-headless.${namespace}.svc.cluster.local"
+              sentinel_file="/data/sentinel/sentinel.conf"
+
+              mkdir -p /runtime /data/sentinel
+              sed "s/__REDIS_PASSWORD__/${REDIS_PASSWORD}/g" \
+                /bootstrap/redis.conf.template > /runtime/redis.conf
+
+              current_master=""
+              peer=0
+              while [ "${peer}" -lt "${REDIS_REPLICAS}" ]; do
+                peer_host="redis-${peer}.redis-headless.${namespace}.svc.cluster.local"
+                current_master="$(redis-cli --no-auth-warning -a "${REDIS_PASSWORD}" \
+                  -h "${peer_host}" -p 26379 --raw SENTINEL \
+                  get-master-addr-by-name "${REDIS_MASTER_NAME}" 2>/dev/null \
+                  | sed -n '1p' || true)"
+                [ -n "${current_master}" ] && break
+                peer=$((peer + 1))
+              done
+
+              if [ -z "${current_master}" ]; then
+                if [ "${pod_ordinal}" != "0" ]; then
+                  printf '\nreplicaof %s 6379\n' "${initial_master}" >> /runtime/redis.conf
+                fi
+              else
+                pod_fqdn="${HOSTNAME}.redis-headless.${namespace}.svc.cluster.local"
+                pod_ip="$(hostname -i | awk '{print $1}')"
+                case "${current_master}" in
+                  "${HOSTNAME}"|"${pod_fqdn}"|"${pod_ip}") ;;
+                  *) printf '\nreplicaof %s 6379\n' "${current_master}" >> /runtime/redis.conf ;;
+                esac
+              fi
+
+              if [ ! -s "${sentinel_file}" ]; then
+                sed \
+                  -e "s/__REDIS_PASSWORD__/${REDIS_PASSWORD}/g" \
+                  -e "s/__MASTER_NAME__/${REDIS_MASTER_NAME}/g" \
+                  -e "s|__INITIAL_MASTER__|${initial_master}|g" \
+                  -e "s/__QUORUM__/${REDIS_SENTINEL_QUORUM}/g" \
+                  -e "s/__DOWN_AFTER_MS__/${REDIS_SENTINEL_DOWN_AFTER_MS}/g" \
+                  -e "s/__FAILOVER_TIMEOUT_MS__/${REDIS_SENTINEL_FAILOVER_TIMEOUT_MS}/g" \
+                  /bootstrap/sentinel.conf.template > "${sentinel_file}"
+              fi
+
+              chmod 0600 /runtime/redis.conf "${sentinel_file}"
+
+    - name: Create the Redis headless and Sentinel Services
+      kubernetes.core.k8s:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        state: present
+        apply: true
+        definition: "{{ item }}"
+      loop:
+        - apiVersion: v1
+          kind: Service
+          metadata:
+            name: redis-headless
+            namespace: "{{ data_namespace }}"
+            labels:
+              app.kubernetes.io/name: redis
+              app.kubernetes.io/part-of: ticketing-platform
+          spec:
+            clusterIP: None
+            publishNotReadyAddresses: true
+            selector:
+              app.kubernetes.io/name: redis
+            ports:
+              - name: redis
+                port: 6379
+                targetPort: redis
+              - name: sentinel
+                port: 26379
+                targetPort: sentinel
+        - apiVersion: v1
+          kind: Service
+          metadata:
+            name: redis-sentinel
+            namespace: "{{ data_namespace }}"
+            labels:
+              app.kubernetes.io/name: redis
+              app.kubernetes.io/part-of: ticketing-platform
+          spec:
+            type: ClusterIP
+            selector:
+              app.kubernetes.io/name: redis
+            ports:
+              - name: sentinel
+                port: 26379
+                targetPort: sentinel
+
+    - name: Remove the legacy direct Redis Service
+      kubernetes.core.k8s:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        state: absent
+        api_version: v1
+        kind: Service
+        namespace: "{{ data_namespace }}"
+        name: redis
+
+    - name: Create a Redis PodDisruptionBudget
+      kubernetes.core.k8s:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        state: present
+        apply: true
+        definition:
+          apiVersion: policy/v1
+          kind: PodDisruptionBudget
+          metadata:
+            name: redis-ha
+            namespace: "{{ data_namespace }}"
+          spec:
+            minAvailable: 2
+            selector:
+              matchLabels:
+                app.kubernetes.io/name: redis
+
+    - name: Create the three-node Redis and Sentinel StatefulSet
+      kubernetes.core.k8s:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        state: present
+        apply: true
+        definition:
+          apiVersion: apps/v1
+          kind: StatefulSet
+          metadata:
+            name: redis
+            namespace: "{{ data_namespace }}"
+            labels:
+              app.kubernetes.io/name: redis
+              app.kubernetes.io/part-of: ticketing-platform
+          spec:
+            serviceName: redis-headless
+            replicas: "{{ redis_replicas }}"
+            podManagementPolicy: OrderedReady
+            persistentVolumeClaimRetentionPolicy:
+              whenDeleted: Retain
+              whenScaled: Retain
+            selector:
+              matchLabels:
+                app.kubernetes.io/name: redis
+            template:
+              metadata:
+                labels:
+                  app.kubernetes.io/name: redis
+                  app.kubernetes.io/part-of: ticketing-platform
+              spec:
+                terminationGracePeriodSeconds: 30
+                securityContext:
+                  fsGroup: 999
+                  fsGroupChangePolicy: OnRootMismatch
+                affinity:
+                  nodeAffinity:
+                    requiredDuringSchedulingIgnoredDuringExecution:
+                      nodeSelectorTerms:
+                        - matchExpressions:
+                            - key: node-role.kubernetes.io/control-plane
+                              operator: DoesNotExist
+                            - key: node-role.kubernetes.io/master
+                              operator: DoesNotExist
+                  podAntiAffinity:
+                    requiredDuringSchedulingIgnoredDuringExecution:
+                      - topologyKey: "{{ worker_topology_key }}"
+                        labelSelector:
+                          matchLabels:
+                            app.kubernetes.io/name: redis
+                initContainers:
+                  - name: prepare-redis-ha
+                    image: "{{ redis_image }}"
+                    imagePullPolicy: IfNotPresent
+                    command:
+                      - sh
+                      - /bootstrap/prepare.sh
+                    env:
+                      - name: POD_NAMESPACE
+                        valueFrom:
+                          fieldRef:
+                            fieldPath: metadata.namespace
+                      - name: REDIS_PASSWORD
+                        valueFrom:
+                          secretKeyRef:
+                            name: redis-auth
+                            key: password
+                      - name: REDIS_REPLICAS
+                        value: "{{ redis_replicas | string }}"
+                      - name: REDIS_MASTER_NAME
+                        value: "{{ redis_master_name }}"
+                      - name: REDIS_SENTINEL_QUORUM
+                        value: "{{ redis_sentinel_quorum | string }}"
+                      - name: REDIS_SENTINEL_DOWN_AFTER_MS
+                        value: "{{ redis_sentinel_down_after_ms | string }}"
+                      - name: REDIS_SENTINEL_FAILOVER_TIMEOUT_MS
+                        value: "{{ redis_sentinel_failover_timeout_ms | string }}"
+                    volumeMounts:
+                      - name: redis-bootstrap
+                        mountPath: /bootstrap
+                        readOnly: true
+                      - name: redis-runtime
+                        mountPath: /runtime
+                      - name: redis-data
+                        mountPath: /data
+                containers:
+                  - name: redis
+                    image: "{{ redis_image }}"
+                    imagePullPolicy: IfNotPresent
+                    command:
+                      - redis-server
+                      - /runtime/redis.conf
+                    env:
+                      - name: REDIS_PASSWORD
+                        valueFrom:
+                          secretKeyRef:
+                            name: redis-auth
+                            key: password
+                    ports:
+                      - name: redis
+                        containerPort: 6379
+                    resources:
+                      requests:
+                        cpu: 250m
+                        memory: 512Mi
+                      limits:
+                        cpu: 500m
+                        memory: 1Gi
+                    readinessProbe:
+                      exec:
+                        command:
+                          - sh
+                          - -ec
+                          - REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping | grep -q PONG
+                      initialDelaySeconds: 5
+                      periodSeconds: 5
+                      timeoutSeconds: 3
+                      failureThreshold: 12
+                    livenessProbe:
+                      exec:
+                        command:
+                          - sh
+                          - -ec
+                          - REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping | grep -q PONG
+                      initialDelaySeconds: 20
+                      periodSeconds: 10
+                      timeoutSeconds: 3
+                      failureThreshold: 6
+                    volumeMounts:
+                      - name: redis-data
+                        mountPath: /data
+                      - name: redis-runtime
+                        mountPath: /runtime
+                  - name: sentinel
+                    image: "{{ redis_image }}"
+                    imagePullPolicy: IfNotPresent
+                    command:
+                      - redis-server
+                      - /data/sentinel/sentinel.conf
+                      - --sentinel
+                    env:
+                      - name: REDIS_PASSWORD
+                        valueFrom:
+                          secretKeyRef:
+                            name: redis-auth
+                            key: password
+                    ports:
+                      - name: sentinel
+                        containerPort: 26379
+                    resources:
+                      requests:
+                        cpu: 50m
+                        memory: 64Mi
+                      limits:
+                        cpu: 200m
+                        memory: 256Mi
+                    readinessProbe:
+                      exec:
+                        command:
+                          - sh
+                          - -ec
+                          - REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli -p 26379 ping | grep -q PONG
+                      initialDelaySeconds: 10
+                      periodSeconds: 5
+                      timeoutSeconds: 3
+                      failureThreshold: 12
+                    livenessProbe:
+                      exec:
+                        command:
+                          - sh
+                          - -ec
+                          - REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli -p 26379 ping | grep -q PONG
+                      initialDelaySeconds: 30
+                      periodSeconds: 10
+                      timeoutSeconds: 3
+                      failureThreshold: 6
+                    volumeMounts:
+                      - name: redis-data
+                        mountPath: /data
+                  - name: redis-exporter
+                    image: "{{ redis_exporter_image }}"
+                    imagePullPolicy: IfNotPresent
+                    env:
+                      - name: REDIS_ADDR
+                        value: redis://127.0.0.1:6379
+                      - name: REDIS_PASSWORD
+                        valueFrom:
+                          secretKeyRef:
+                            name: redis-auth
+                            key: password
+                    ports:
+                      - name: metrics
+                        containerPort: 9121
+                    resources:
+                      requests:
+                        cpu: 25m
+                        memory: 32Mi
+                      limits:
+                        cpu: 100m
+                        memory: 128Mi
+                    readinessProbe:
+                      httpGet:
+                        path: /health
+                        port: metrics
+                      initialDelaySeconds: 5
+                      periodSeconds: 10
+                volumes:
+                  - name: redis-bootstrap
+                    configMap:
+                      name: redis-ha-config
+                      defaultMode: 0555
+                  - name: redis-runtime
+                    emptyDir: {}
+            volumeClaimTemplates:
+              - metadata:
+                  name: redis-data
+                  labels:
+                    app.kubernetes.io/name: redis
+                spec:
+                  accessModes:
+                    - ReadWriteOnce
+                  storageClassName: "{{ redis_storage_class_name }}"
+                  resources:
+                    requests:
+                      storage: "{{ redis_storage_size }}"
+
+    - name: Wait for all Redis and Sentinel Pods to become Ready
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - --namespace
+          - "{{ data_namespace }}"
+          - rollout
+          - status
+          - statefulset/redis
+          - --timeout=600s
+      changed_when: false
+
+    - name: Read Redis PVCs
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        api_version: v1
+        kind: PersistentVolumeClaim
+        namespace: "{{ data_namespace }}"
+        label_selectors:
+          - app.kubernetes.io/name=redis
+      register: redis_pvcs
+
+    - name: Require three Bound Redis PVCs
+      ansible.builtin.assert:
+        that:
+          - (redis_pvcs.resources | length) == (redis_replicas | int)
+          - redis_pvcs.resources | map(attribute='status.phase') | reject('equalto', 'Bound') | list | length == 0
+        fail_msg: >-
+          Redis requires one 5 Gi Local PV on each of three Workers. Check PV capacity,
+          nodeAffinity, local path, permissions, and the local-storage StorageClass.
+
+    - name: Read the Worker placement of Redis Pods
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - --namespace
+          - "{{ data_namespace }}"
+          - get
+          - pod
+          - --selector
+          - app.kubernetes.io/name=redis
+          - --output
+          - 'jsonpath={range .items[*]}{.spec.nodeName}{"\n"}{end}'
+      register: redis_nodes
+      changed_when: false
+
+    - name: Require Redis to span three different Workers
+      ansible.builtin.assert:
+        that:
+          - (redis_nodes.stdout_lines | reject('equalto', '') | list | length) == (redis_replicas | int)
+          - (redis_nodes.stdout_lines | reject('equalto', '') | unique | list | length) == (redis_replicas | int)
+        fail_msg: >-
+          Redis Pods are not distributed across three different Worker nodes. Check
+          Local PV nodeAffinity and free resources on Worker 1, Worker 2, and Worker 3.
+
+    - name: Ask Sentinel for the current Redis Primary
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - --namespace
+          - "{{ data_namespace }}"
+          - exec
+          - redis-0
+          - -c
+          - redis
+          - --
+          - redis-cli
+          - --no-auth-warning
+          - -a
+          - "{{ redis_password }}"
+          - -p
+          - '26379'
+          - --raw
+          - SENTINEL
+          - get-master-addr-by-name
+          - "{{ redis_master_name }}"
+      register: redis_primary
+      changed_when: false
+      no_log: true
+
+    - name: Require Sentinel quorum
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - --namespace
+          - "{{ data_namespace }}"
+          - exec
+          - redis-0
+          - -c
+          - redis
+          - --
+          - redis-cli
+          - --no-auth-warning
+          - -a
+          - "{{ redis_password }}"
+          - -p
+          - '26379'
+          - SENTINEL
+          - ckquorum
+          - "{{ redis_master_name }}"
+      register: redis_quorum
+      changed_when: false
+      no_log: true
+
+    - name: Read the role of every Redis instance
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - --namespace
+          - "{{ data_namespace }}"
+          - exec
+          - "redis-{{ item }}"
+          - -c
+          - redis
+          - --
+          - redis-cli
+          - --no-auth-warning
+          - -a
+          - "{{ redis_password }}"
+          - --raw
+          - ROLE
+      loop: "{{ range(0, redis_replicas | int) | list }}"
+      register: redis_roles
+      changed_when: false
+      no_log: true
+
+    - name: Write a short-lived key through the Sentinel-discovered Primary
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - --namespace
+          - "{{ data_namespace }}"
+          - exec
+          - redis-0
+          - -c
+          - redis
+          - --
+          - redis-cli
+          - --no-auth-warning
+          - -a
+          - "{{ redis_password }}"
+          - -h
+          - "{{ redis_primary.stdout_lines[0] }}"
+          - SET
+          - ansible:healthcheck
+          - ready
+          - EX
+          - '60'
+      register: redis_write
+      changed_when: false
+      no_log: true
+
+    - name: Require Redis replication and Sentinel validation to pass
+      ansible.builtin.assert:
+        that:
+          - (redis_primary.stdout_lines | length) == 2
+          - "'OK' in redis_quorum.stdout"
+          - (redis_roles.results | selectattr('stdout_lines.0', 'equalto', 'master') | list | length) == 1
+          - (redis_roles.results | selectattr('stdout_lines.0', 'equalto', 'slave') | list | length) == 2
+          - redis_write.stdout | trim == 'OK'
+        success_msg: >-
+          Redis HA is complete: one Primary, two Replicas, and three Sentinels are
+          Ready on three Workers; quorum and authenticated writes both passed.
+      no_log: true
+
+    - name: Print the Redis Sentinel application endpoint
+      ansible.builtin.debug:
+        msg:
+          - "Sentinel DNS: redis-sentinel.{{ data_namespace }}.svc.cluster.local:26379"
+          - "Sentinel master name: {{ redis_master_name }}"
+          - "Password Secret: {{ data_namespace }}/redis-auth key=password"
+          - "The FastAPI Redis client must support Sentinel; do not write to a fixed Redis Pod."

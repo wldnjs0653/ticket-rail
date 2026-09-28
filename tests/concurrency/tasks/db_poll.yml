@@ -1,0 +1,39 @@
+---
+- name: Initialize this DB observation
+  ansible.builtin.set_fact:
+    db_poll_query: {}
+    db_snapshot: {}
+    db_poll_error: ''
+- name: Read current primary and inspect booking
+  block:
+    - name: Resolve primary again for this observation
+      ansible.builtin.include_tasks: primary.yml
+    - name: Query booking, seat and payment in one read-only transaction
+      ansible.builtin.command:
+        argv: "{{ psql_argv }}"
+        stdin: "{{ lookup('file', run_dir + '/verify.sql') }}"
+      register: db_poll_query
+      changed_when: false
+    - name: Decode DB rows and invariants
+      ansible.builtin.set_fact:
+        db_snapshot: "{{ db_poll_query.stdout | from_json }}"
+    - name: Keep DB result independent from API result
+      ansible.builtin.set_fact:
+        db_ok: "{{ db_snapshot.ok | default(false) | bool }}"
+  rescue:
+    - name: Preserve failed DB observation
+      ansible.builtin.set_fact:
+        db_poll_error: "{{ ansible_failed_result.msg | default('DB query error') }}"
+        db_ok: false
+- name: Append raw observation to history
+  ansible.builtin.set_fact:
+    db_attempts: "{{ db_attempts + [{'attempt': db_attempt, 'primary': primary_query.stdout | default(''), 'query': db_poll_query, 'data': db_snapshot, 'error': db_poll_error}] }}"
+- name: Persist polling evidence as it arrives
+  ansible.builtin.copy:
+    dest: "{{ run_dir }}/db-history.json"
+    content: "{{ db_attempts | to_nice_json }}"
+    mode: '0600'
+- name: Wait for asynchronous payment when necessary
+  ansible.builtin.pause:
+    seconds: "{{ db_poll_seconds | int }}"
+  when: not db_ok and db_attempt | int < db_poll_attempts | int

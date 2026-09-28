@@ -1,0 +1,7 @@
+kind,user_id,seat_id,target_ms,start_ms,end_ms,lateness_ms,status,booking_id
+{% for r in hold_records | sort(attribute='user_id') %}
+hold,{{ r.user_id }},{{ r.seat_id }},{{ r.target_ms }},{{ r.start_ms }},{{ r.end_ms }},{{ r.lateness_ms }},{{ r.status }},
+{% endfor %}
+{% for r in booking_records %}
+booking,{{ r.user_id }},{{ r.seat_id }},,{{ r.start_ms }},{{ r.end_ms }},,{{ r.status }},{{ r.booking_id }}
+{% endfor %}

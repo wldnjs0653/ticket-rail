@@ -1,0 +1,12 @@
+---
+- name: Allow Redis from Kubernetes workers
+  ansible.builtin.command:
+    argv:
+      - firewall-cmd
+      - --permanent
+      - --zone=public
+      - --add-rich-rule=rule family="ipv4" source address="{{ item }}/32" port port="6379" protocol="tcp" accept
+  loop: "{{ redis_allowed_sources }}"
+  register: redis_firewall_rules
+  changed_when: "'ALREADY_ENABLED' not in redis_firewall_rules.stdout"
+  notify: Reload firewalld

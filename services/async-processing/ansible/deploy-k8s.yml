@@ -1,0 +1,209 @@
+---
+- name: Deploy the complete Consumer and Mock stack to Kubernetes
+  hosts: localhost
+  connection: local
+  become: true
+  gather_facts: true
+
+  vars_files:
+    - vars/main.yml
+
+  vars:
+    ansible_python_interpreter: "{{ controller_python }}"
+    deployment_revision: "{{ ansible_date_time.epoch }}"
+    rendered_manifest: /var/tmp/ticketing-consumer-mock-stack.yml
+    supporting_deployments:
+      - mock-payment
+      - mock-notification
+    consumer_deployments:
+      - payment-consumer
+      - notification-consumer
+
+  tasks:
+    - name: Check the Kafka bootstrap Service
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        api_version: v1
+        kind: Service
+        namespace: "{{ data_namespace }}"
+        name: "{{ kafka_cluster_name }}-kafka-bootstrap"
+      register: kafka_service
+
+    - name: Require the Kafka bootstrap Service
+      ansible.builtin.assert:
+        that:
+          - kafka_service.resources | length == 1
+        fail_msg: "Kafka bootstrap Service is missing from the data namespace."
+
+    - name: Check the required Kafka topics
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        api_version: kafka.strimzi.io/v1
+        kind: KafkaTopic
+        namespace: "{{ data_namespace }}"
+        name: "{{ item }}"
+      loop:
+        - booking-created
+        - payment-completed
+      register: kafka_topics
+
+    - name: Require booking.created and payment.completed
+      ansible.builtin.assert:
+        that:
+          - kafka_topics.results | map(attribute='resources') | map('length') | min == 1
+        fail_msg: "The booking.created or payment.completed KafkaTopic is missing."
+
+    - name: Render the Kubernetes stack manifest
+      ansible.builtin.template:
+        src: templates/k8s-stack.yml.j2
+        dest: "{{ rendered_manifest }}"
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Apply the Kubernetes stack
+      kubernetes.core.k8s:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        state: present
+        apply: true
+        src: "{{ rendered_manifest }}"
+
+    - name: Wait for all application rollouts with automatic diagnostics
+      block:
+        - name: Wait for the Mock Service Deployments
+          ansible.builtin.command:
+            argv:
+              - kubectl
+              - "--kubeconfig={{ controller_kubeconfig }}"
+              - --namespace
+              - "{{ app_namespace }}"
+              - rollout
+              - status
+              - "deployment/{{ item }}"
+              - --timeout=300s
+          loop: "{{ supporting_deployments }}"
+          changed_when: false
+
+        - name: Verify Kafka Service DNS from the app namespace
+          ansible.builtin.command:
+            argv:
+              - kubectl
+              - "--kubeconfig={{ controller_kubeconfig }}"
+              - --namespace
+              - "{{ app_namespace }}"
+              - exec
+              - deployment/mock-payment
+              - --
+              - node
+              - -e
+              - >-
+                require('node:dns').lookup(process.argv[1], (error, address) => {
+                  if (error) { console.error(error); process.exit(1); }
+                  console.log(`${process.argv[1]} -> ${address}`);
+                });
+              - "{{ kafka_cluster_name }}-kafka-bootstrap.{{ data_namespace }}"
+          changed_when: false
+
+        - name: Wait for the Consumer Deployments
+          ansible.builtin.command:
+            argv:
+              - kubectl
+              - "--kubeconfig={{ controller_kubeconfig }}"
+              - --namespace
+              - "{{ app_namespace }}"
+              - rollout
+              - status
+              - "deployment/{{ item }}"
+              - --timeout=300s
+          loop: "{{ consumer_deployments }}"
+          changed_when: false
+
+      rescue:
+        - name: Read failed application Pods
+          ansible.builtin.command:
+            argv:
+              - kubectl
+              - "--kubeconfig={{ controller_kubeconfig }}"
+              - --namespace
+              - "{{ app_namespace }}"
+              - get
+              - pods
+              - --output=wide
+          register: failed_application_pods
+          changed_when: false
+          failed_when: false
+
+        - name: Read recent application events
+          ansible.builtin.command:
+            argv:
+              - kubectl
+              - "--kubeconfig={{ controller_kubeconfig }}"
+              - --namespace
+              - "{{ app_namespace }}"
+              - get
+              - events
+              - --sort-by=.lastTimestamp
+          register: failed_application_events
+          changed_when: false
+          failed_when: false
+
+        - name: Read Consumer logs
+          ansible.builtin.command:
+            argv:
+              - kubectl
+              - "--kubeconfig={{ controller_kubeconfig }}"
+              - --namespace
+              - "{{ app_namespace }}"
+              - logs
+              - --selector
+              - "app.kubernetes.io/name={{ item }}"
+              - --all-containers=true
+              - --tail=50
+              - --prefix=true
+          loop: "{{ consumer_deployments }}"
+          register: failed_consumer_logs
+          changed_when: false
+          failed_when: false
+
+        - name: Print rollout diagnostics
+          ansible.builtin.debug:
+            msg:
+              - "{{ failed_application_pods.stdout_lines }}"
+              - "{{ failed_application_events.stdout_lines[-30:] }}"
+              - "{{ failed_consumer_logs.results | map(attribute='stdout_lines') | list }}"
+
+        - name: Stop after rollout diagnostics
+          ansible.builtin.fail:
+            msg: "Application rollout failed. Review the Pod and Event output above."
+
+    - name: Read application Pod placement
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - --namespace
+          - "{{ app_namespace }}"
+          - get
+          - pods
+          - --selector
+          - app.kubernetes.io/part-of=ticketing-platform
+          - --output=wide
+      register: application_pods
+      changed_when: false
+
+    - name: Print application Pod placement
+      ansible.builtin.debug:
+        var: application_pods.stdout_lines
+
+    - name: Read Controller service state
+      ansible.builtin.service_facts:
+
+    - name: Stop the temporary Controller Mock services after Kubernetes migration
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+      loop:
+        - "{{ mock_payment_name }}"
+        - "{{ mock_notification_name }}"
+      when: (item ~ '.service') in ansible_facts.services

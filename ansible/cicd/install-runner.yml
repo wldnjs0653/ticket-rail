@@ -1,0 +1,190 @@
+---
+- name: Install GitHub Actions deployment runner
+  hosts: localhost
+  connection: local
+  become: true
+  gather_facts: true
+
+  vars:
+    github_repository_url: >-
+      {{ lookup('env', 'GITHUB_REPOSITORY_URL')
+         | default('https://github.com/OWNER/REPOSITORY', true) }}
+
+    runner_version: "2.337.0"
+    runner_checksum: "70920811a4f8ad4328818682bca5c6469c1c942fab52448868071d0063816613"
+
+    runner_user: "github-runner"
+    runner_group: "github-runner"
+    runner_home: "/home/github-runner"
+    runner_install_dir: "/opt/actions-runner"
+    runner_work_dir: "_work"
+
+    runner_name: "ansible-controller-ticketing-cd"
+    runner_labels: "ticketing-cd,ansible,kubernetes"
+
+    runner_archive: >-
+      /tmp/actions-runner-linux-x64-{{ runner_version }}.tar.gz
+
+    runner_download_url: >-
+      https://github.com/actions/runner/releases/download/v{{ runner_version }}/actions-runner-linux-x64-{{ runner_version }}.tar.gz
+
+  vars_prompt:
+    - name: github_runner_token
+      prompt: "GitHub Runner registration token"
+      private: true
+
+  pre_tasks:
+    - name: Require a repository URL
+      ansible.builtin.assert:
+        that:
+          - github_repository_url != 'https://github.com/OWNER/REPOSITORY'
+        fail_msg: >-
+          Set GITHUB_REPOSITORY_URL before registering the Runner.
+
+    - name: Verify supported architecture
+      ansible.builtin.assert:
+        that:
+          - ansible_architecture == "x86_64"
+        fail_msg: >-
+          This Playbook supports only Linux x86_64.
+        success_msg: >-
+          Supported Linux x86_64 architecture confirmed.
+
+  tasks:
+    - name: Install required packages
+      ansible.builtin.dnf:
+        name:
+          - ca-certificates
+          - curl
+          - git
+          - tar
+          - gzip
+        state: present
+
+    - name: Create Runner group
+      ansible.builtin.group:
+        name: "{{ runner_group }}"
+        system: true
+        state: present
+
+    - name: Create unprivileged Runner user
+      ansible.builtin.user:
+        name: "{{ runner_user }}"
+        group: "{{ runner_group }}"
+        home: "{{ runner_home }}"
+        shell: /bin/bash
+        create_home: true
+        system: true
+        state: present
+
+    - name: Create Runner installation directory
+      ansible.builtin.file:
+        path: "{{ runner_install_dir }}"
+        state: directory
+        owner: "{{ runner_user }}"
+        group: "{{ runner_group }}"
+        mode: "0750"
+
+    - name: Download GitHub Actions Runner
+      ansible.builtin.get_url:
+        url: "{{ runner_download_url }}"
+        dest: "{{ runner_archive }}"
+        checksum: "sha256:{{ runner_checksum }}"
+        mode: "0644"
+
+    - name: Extract GitHub Actions Runner
+      ansible.builtin.unarchive:
+        src: "{{ runner_archive }}"
+        dest: "{{ runner_install_dir }}"
+        remote_src: true
+        owner: "{{ runner_user }}"
+        group: "{{ runner_group }}"
+        creates: "{{ runner_install_dir }}/config.sh"
+
+    - name: Check whether Runner is already registered
+      ansible.builtin.stat:
+        path: "{{ runner_install_dir }}/.runner"
+      register: runner_registration
+
+    - name: Validate registration token
+      ansible.builtin.assert:
+        that:
+          - github_runner_token | length > 0
+        fail_msg: "GitHub Runner registration token is required."
+      when: not runner_registration.stat.exists
+      no_log: true
+
+    - name: Install Runner operating-system dependencies
+      ansible.builtin.command:
+        cmd: ./bin/installdependencies.sh
+        chdir: "{{ runner_install_dir }}"
+      when: not runner_registration.stat.exists
+      changed_when: true
+
+    - name: Register Runner with GitHub repository
+      become_user: "{{ runner_user }}"
+      ansible.builtin.command:
+        argv:
+          - ./config.sh
+          - --unattended
+          - --url
+          - "{{ github_repository_url }}"
+          - --token
+          - "{{ github_runner_token }}"
+          - --name
+          - "{{ runner_name }}"
+          - --labels
+          - "{{ runner_labels }}"
+          - --work
+          - "{{ runner_work_dir }}"
+          - --replace
+        chdir: "{{ runner_install_dir }}"
+      environment:
+        HOME: "{{ runner_home }}"
+      when: not runner_registration.stat.exists
+      no_log: true
+
+    - name: Check whether Runner service is installed
+      ansible.builtin.stat:
+        path: "{{ runner_install_dir }}/.service"
+      register: runner_service
+
+    - name: Install Runner systemd service
+      ansible.builtin.command:
+        cmd: "./svc.sh install {{ runner_user }}"
+        chdir: "{{ runner_install_dir }}"
+      when: not runner_service.stat.exists
+      changed_when: true
+
+    - name: Read Runner service name
+      ansible.builtin.slurp:
+        src: "{{ runner_install_dir }}/.service"
+      register: runner_service_file
+
+    - name: Store Runner service name
+      ansible.builtin.set_fact:
+        runner_service_name: >-
+          {{ runner_service_file.content | b64decode | trim }}
+
+    - name: Enable and start Runner service
+      ansible.builtin.systemd:
+        name: "{{ runner_service_name }}"
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    - name: Verify Runner service
+      ansible.builtin.command:
+        cmd: systemctl is-active "{{ runner_service_name }}"
+      register: runner_active
+      changed_when: false
+      failed_when: runner_active.stdout | trim != "active"
+
+    - name: Print Runner installation result
+      ansible.builtin.debug:
+        msg:
+          - "Runner installation completed."
+          - "Runner name: {{ runner_name }}"
+          - "Runner labels: {{ runner_labels }}"
+          - "Service: {{ runner_service_name }}"
+          - "Service state: {{ runner_active.stdout | trim }}"

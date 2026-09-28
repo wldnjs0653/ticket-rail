@@ -1,0 +1,121 @@
+---
+# ============================================================
+# 1. Data 파티션의 기존 filesystem 확인
+# ============================================================
+
+- name: Read data partition filesystem type
+  ansible.builtin.command:
+    argv:
+      - lsblk
+      - -dnro
+      - FSTYPE
+      - "{{ storage_partition_devices[partition.name] }}"
+  loop: "{{ storage_partitions }}"
+  loop_control:
+    loop_var: partition
+    label: "{{ partition.name }}"
+  register: storage_filesystem_info
+  changed_when: false
+
+
+# ============================================================
+# 2. 빈 파티션 또는 XFS만 허용
+# ============================================================
+
+- name: Verify existing filesystem types
+  ansible.builtin.assert:
+    that:
+      - filesystem_result.stdout | trim in ["", "xfs"]
+    fail_msg: >-
+      중단: {{ storage_partition_devices[filesystem_result.partition.name] }}에
+      예상하지 못한 파일시스템
+      {{ filesystem_result.stdout | trim }}이 있습니다.
+  loop: "{{ storage_filesystem_info.results }}"
+  loop_control:
+    loop_var: filesystem_result
+    label: "{{ filesystem_result.partition.name }}"
+
+
+# ============================================================
+# 3. filesystem이 없는 파티션에만 XFS 생성
+# ============================================================
+
+- name: Create XFS filesystems
+  ansible.builtin.command:
+    argv:
+      - mkfs.xfs
+      - -L
+      - "{{ filesystem_result.partition.filesystem_label }}"
+      - "{{ storage_partition_devices[filesystem_result.partition.name] }}"
+  loop: "{{ storage_filesystem_info.results }}"
+  loop_control:
+    loop_var: filesystem_result
+    label: "{{ filesystem_result.partition.name }}"
+  when:
+    - filesystem_result.stdout | trim == ""
+
+
+# ============================================================
+# 4. 최종 filesystem type 확인
+# ============================================================
+
+- name: Read final data partition filesystem type
+  ansible.builtin.command:
+    argv:
+      - lsblk
+      - -dnro
+      - FSTYPE
+      - "{{ storage_partition_devices[partition.name] }}"
+  loop: "{{ storage_partitions }}"
+  loop_control:
+    loop_var: partition
+    label: "{{ partition.name }}"
+  register: storage_final_filesystem_info
+  changed_when: false
+
+- name: Verify all data partitions use XFS
+  ansible.builtin.assert:
+    that:
+      - filesystem_result.stdout | trim == "xfs"
+    fail_msg: >-
+      중단: {{ storage_partition_devices[filesystem_result.partition.name] }}의
+      filesystem이 XFS가 아닙니다.
+      actual={{ filesystem_result.stdout | trim }}
+  loop: "{{ storage_final_filesystem_info.results }}"
+  loop_control:
+    loop_var: filesystem_result
+    label: "{{ filesystem_result.partition.name }}"
+
+
+# ============================================================
+# 5. filesystem LABEL 확인
+# ============================================================
+
+- name: Read data partition filesystem labels
+  ansible.builtin.command:
+    argv:
+      - lsblk
+      - -dnro
+      - LABEL
+      - "{{ storage_partition_devices[partition.name] }}"
+  loop: "{{ storage_partitions }}"
+  loop_control:
+    loop_var: partition
+    label: "{{ partition.name }}"
+  register: storage_filesystem_labels
+  changed_when: false
+
+- name: Verify data partition filesystem labels
+  ansible.builtin.assert:
+    that:
+      - label_result.stdout | trim ==
+        label_result.partition.filesystem_label
+    fail_msg: >-
+      중단: {{ storage_partition_devices[label_result.partition.name] }}의
+      filesystem LABEL이 예상과 다릅니다.
+      expected={{ label_result.partition.filesystem_label }}
+      actual={{ label_result.stdout | trim }}
+  loop: "{{ storage_filesystem_labels.results }}"
+  loop_control:
+    loop_var: label_result
+    label: "{{ label_result.partition.name }}"

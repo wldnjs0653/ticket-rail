@@ -1,0 +1,438 @@
+---
+- name: Deploy and verify PostgreSQL with CloudNativePG from start to finish
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/main.yml
+  vars:
+    ansible_python_interpreter: "{{ controller_python }}"
+
+  pre_tasks:
+    - name: Run shared Kubernetes and storage checks
+      ansible.builtin.include_tasks: tasks/cluster_prerequisites.yml
+      vars:
+        required_storage_class_names:
+          - "{{ postgresql_storage_class_name }}"
+
+    - name: Read an existing PostgreSQL application Secret
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        api_version: v1
+        kind: Secret
+        namespace: "{{ data_namespace }}"
+        name: ticketing-postgresql-app
+      register: existing_postgresql_secret
+      no_log: true
+
+    - name: Generate or reuse the PostgreSQL application password
+      ansible.builtin.set_fact:
+        postgresql_password: >-
+          {{ (existing_postgresql_secret.resources[0].data.password | b64decode)
+          if existing_postgresql_secret.resources | length == 1
+          else lookup('ansible.builtin.password', playbook_dir
+          + '/.secrets/postgresql-password length=32 chars=ascii_letters,digits') }}
+      no_log: true
+
+  tasks:
+    - name: Add or refresh the official CloudNativePG Helm repository
+      ansible.builtin.command:
+        argv:
+          - "{{ helm_binary }}"
+          - repo
+          - add
+          - cnpg
+          - https://cloudnative-pg.github.io/charts
+          - --force-update
+      register: cnpg_repo
+      changed_when: "'has been added' in cnpg_repo.stdout or 'has been updated' in cnpg_repo.stdout"
+
+    - name: Install the CloudNativePG Operator
+      kubernetes.core.helm:
+        binary_path: "{{ helm_binary }}"
+        kubeconfig: "{{ controller_kubeconfig }}"
+        release_name: cnpg
+        chart_ref: cnpg/cloudnative-pg
+        chart_version: "{{ cnpg_chart_version }}"
+        release_namespace: cnpg-system
+        create_namespace: true
+        release_state: present
+        update_repo_cache: true
+        reset_values: true
+        atomic: true
+        wait: true
+        timeout: 10m0s
+        history_max: 5
+        release_values:
+          replicaCount: 1
+          crds:
+            create: true
+          config:
+            create: true
+            clusterWide: true
+            data:
+              WATCH_NAMESPACE: "{{ data_namespace }}"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+    - name: Wait for the CloudNativePG Cluster CRD
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - wait
+          - --for=condition=Established
+          - customresourcedefinition/clusters.postgresql.cnpg.io
+          - --timeout=180s
+      changed_when: false
+
+    - name: Create the PostgreSQL application credential Secret
+      kubernetes.core.k8s:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        state: present
+        apply: true
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: ticketing-postgresql-app
+            namespace: "{{ data_namespace }}"
+            labels:
+              app.kubernetes.io/name: "{{ postgresql_cluster_name }}"
+              app.kubernetes.io/part-of: ticketing-platform
+          type: kubernetes.io/basic-auth
+          stringData:
+            username: "{{ postgresql_owner }}"
+            password: "{{ postgresql_password }}"
+      no_log: true
+
+    - name: Create PostgreSQL Cluster and initial ticketing schema
+      kubernetes.core.k8s:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        state: present
+        apply: true
+        definition:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          metadata:
+            name: "{{ postgresql_cluster_name }}"
+            namespace: "{{ data_namespace }}"
+            labels:
+              app.kubernetes.io/name: "{{ postgresql_cluster_name }}"
+              app.kubernetes.io/part-of: ticketing-platform
+          spec:
+            instances: "{{ postgresql_instances }}"
+            primaryUpdateStrategy: unsupervised
+            bootstrap:
+              initdb:
+                database: "{{ postgresql_database }}"
+                owner: "{{ postgresql_owner }}"
+                secret:
+                  name: ticketing-postgresql-app
+                postInitApplicationSQL:
+                  - >-
+                    ALTER DATABASE {{ postgresql_database }}
+                    SET search_path TO public
+                  - >-
+                    CREATE TABLE IF NOT EXISTS public.app_user (
+                    id BIGSERIAL PRIMARY KEY,
+                    email VARCHAR(255) NOT NULL UNIQUE,
+                    password_hash VARCHAR(255) NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now())
+                  - >-
+                    CREATE TABLE IF NOT EXISTS public.ticket_event (
+                    id BIGSERIAL PRIMARY KEY,
+                    title VARCHAR(200) NOT NULL,
+                    opens_at TIMESTAMPTZ NOT NULL,
+                    closes_at TIMESTAMPTZ NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now())
+                  - >-
+                    CREATE TABLE IF NOT EXISTS public.seat (
+                    id BIGSERIAL PRIMARY KEY,
+                    event_id BIGINT NOT NULL REFERENCES public.ticket_event(id),
+                    seat_code VARCHAR(50) NOT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'AVAILABLE',
+                    version BIGINT NOT NULL DEFAULT 0,
+                    UNIQUE(event_id, seat_code))
+                  - >-
+                    CREATE TABLE IF NOT EXISTS public.booking (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL REFERENCES public.app_user(id),
+                    event_id BIGINT NOT NULL REFERENCES public.ticket_event(id),
+                    idempotency_key VARCHAR(100) NOT NULL UNIQUE,
+                    status VARCHAR(20) NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now())
+                  - >-
+                    CREATE TABLE IF NOT EXISTS public.booking_seat (
+                    booking_id BIGINT NOT NULL REFERENCES public.booking(id),
+                    seat_id BIGINT NOT NULL REFERENCES public.seat(id),
+                    PRIMARY KEY (booking_id, seat_id),
+                    UNIQUE(seat_id))
+                  - >-
+                    CREATE TABLE IF NOT EXISTS public.payment (
+                    id BIGSERIAL PRIMARY KEY,
+                    booking_id BIGINT NOT NULL UNIQUE REFERENCES public.booking(id),
+                    status VARCHAR(20) NOT NULL,
+                    amount NUMERIC(12,2) NOT NULL CHECK (amount >= 0),
+                    processed_at TIMESTAMPTZ)
+                  - >-
+                    CREATE TABLE IF NOT EXISTS public.processed_event (
+                    event_id VARCHAR(100) PRIMARY KEY,
+                    event_type VARCHAR(100) NOT NULL,
+                    processed_at TIMESTAMPTZ NOT NULL DEFAULT now())
+                  - >-
+                    ALTER TABLE public.app_user OWNER TO {{ postgresql_owner }};
+                    ALTER TABLE public.ticket_event OWNER TO {{ postgresql_owner }};
+                    ALTER TABLE public.seat OWNER TO {{ postgresql_owner }};
+                    ALTER TABLE public.booking OWNER TO {{ postgresql_owner }};
+                    ALTER TABLE public.booking_seat OWNER TO {{ postgresql_owner }};
+                    ALTER TABLE public.payment OWNER TO {{ postgresql_owner }};
+                    ALTER TABLE public.processed_event OWNER TO {{ postgresql_owner }};
+                    ALTER SEQUENCE IF EXISTS public.app_user_id_seq OWNER TO {{ postgresql_owner }};
+                    ALTER SEQUENCE IF EXISTS public.ticket_event_id_seq OWNER TO {{ postgresql_owner }};
+                    ALTER SEQUENCE IF EXISTS public.seat_id_seq OWNER TO {{ postgresql_owner }};
+                    ALTER SEQUENCE IF EXISTS public.booking_id_seq OWNER TO {{ postgresql_owner }};
+                    ALTER SEQUENCE IF EXISTS public.payment_id_seq OWNER TO {{ postgresql_owner }};
+                    GRANT USAGE, CREATE ON SCHEMA public TO {{ postgresql_owner }};
+                    GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO {{ postgresql_owner }};
+                    GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO {{ postgresql_owner }}
+            storage:
+              size: "{{ postgresql_storage_size }}"
+              storageClass: "{{ postgresql_storage_class_name }}"
+              resizeInUseVolumes: true
+            resources:
+              requests:
+                cpu: 500m
+                memory: 1Gi
+              limits:
+                cpu: '1'
+                memory: 2Gi
+            postgresql:
+              parameters:
+                max_connections: '100'
+                shared_buffers: 256MB
+            affinity:
+              enablePodAntiAffinity: true
+              topologyKey: kubernetes.io/hostname
+              podAntiAffinityType: required
+            monitoring:
+              enablePodMonitor: false
+
+    - name: Wait for the PostgreSQL Cluster to become Ready
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - --namespace
+          - "{{ data_namespace }}"
+          - wait
+          - --for=condition=Ready
+          - "cluster/{{ postgresql_cluster_name }}"
+          - --timeout=900s
+      changed_when: false
+
+    - name: Read PostgreSQL Cluster status
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        api_version: postgresql.cnpg.io/v1
+        kind: Cluster
+        namespace: "{{ data_namespace }}"
+        name: "{{ postgresql_cluster_name }}"
+      register: postgresql_cluster
+
+    - name: Require the expected PostgreSQL instance count
+      ansible.builtin.assert:
+        that:
+          - postgresql_cluster.resources | length == 1
+          - (postgresql_cluster.resources[0].status.readyInstances | int) == (postgresql_instances | int)
+        fail_msg: "CloudNativePG did not report all PostgreSQL instances Ready."
+
+    - name: Read the Worker placement of PostgreSQL instances
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - --namespace
+          - "{{ data_namespace }}"
+          - get
+          - pod
+          - --selector
+          - "cnpg.io/cluster={{ postgresql_cluster_name }}"
+          - --output
+          - 'jsonpath={range .items[*]}{.spec.nodeName}{"\n"}{end}'
+      register: postgresql_nodes
+      changed_when: false
+
+    - name: Require PostgreSQL to span three different Workers
+      ansible.builtin.assert:
+        that:
+          - (postgresql_nodes.stdout_lines | reject('equalto', '') | list | length) == (postgresql_instances | int)
+          - (postgresql_nodes.stdout_lines | reject('equalto', '') | unique | list | length) == (postgresql_instances | int)
+        fail_msg: >-
+          The PostgreSQL Primary and two Standbys are not distributed across three
+          different Worker nodes. Check Local PV nodeAffinity and free resources.
+
+    - name: Find the PostgreSQL primary Pod
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - --namespace
+          - "{{ data_namespace }}"
+          - get
+          - pod
+          - --selector
+          - "cnpg.io/cluster={{ postgresql_cluster_name }},role=primary"
+          - --output
+          - "jsonpath={.items[0].metadata.name}"
+      register: postgresql_primary
+      changed_when: false
+
+    - name: Verify PostgreSQL readiness from inside the primary Pod
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - --namespace
+          - "{{ data_namespace }}"
+          - exec
+          - "{{ postgresql_primary.stdout }}"
+          - --
+          - pg_isready
+          - --dbname
+          - "{{ postgresql_database }}"
+      register: pg_isready
+      changed_when: false
+
+    - name: Reconcile the ticketing schema on every playbook run
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - --namespace
+          - "{{ data_namespace }}"
+          - exec
+          - "{{ postgresql_primary.stdout }}"
+          - --
+          - psql
+          - --username
+          - postgres
+          - --dbname
+          - "{{ postgresql_database }}"
+          - --set
+          - ON_ERROR_STOP=1
+          - --command
+          - >-
+            ALTER DATABASE {{ postgresql_database }} SET search_path TO public;
+            CREATE TABLE IF NOT EXISTS public.app_user
+            (id BIGSERIAL PRIMARY KEY, email VARCHAR(255) NOT NULL UNIQUE,
+            password_hash VARCHAR(255) NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+            CREATE TABLE IF NOT EXISTS public.ticket_event
+            (id BIGSERIAL PRIMARY KEY, title VARCHAR(200) NOT NULL,
+            opens_at TIMESTAMPTZ NOT NULL, closes_at TIMESTAMPTZ NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+            CREATE TABLE IF NOT EXISTS public.seat
+            (id BIGSERIAL PRIMARY KEY,
+            event_id BIGINT NOT NULL REFERENCES public.ticket_event(id),
+            seat_code VARCHAR(50) NOT NULL,
+            status VARCHAR(20) NOT NULL DEFAULT 'AVAILABLE',
+            version BIGINT NOT NULL DEFAULT 0, UNIQUE(event_id, seat_code));
+            CREATE TABLE IF NOT EXISTS public.booking
+            (id BIGSERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL REFERENCES public.app_user(id),
+            event_id BIGINT NOT NULL REFERENCES public.ticket_event(id),
+            idempotency_key VARCHAR(100) NOT NULL UNIQUE,
+            status VARCHAR(20) NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
+            CREATE TABLE IF NOT EXISTS public.booking_seat
+            (booking_id BIGINT NOT NULL REFERENCES public.booking(id),
+            seat_id BIGINT NOT NULL REFERENCES public.seat(id),
+            PRIMARY KEY (booking_id, seat_id), UNIQUE(seat_id));
+            CREATE TABLE IF NOT EXISTS public.payment
+            (id BIGSERIAL PRIMARY KEY,
+            booking_id BIGINT NOT NULL UNIQUE REFERENCES public.booking(id),
+            status VARCHAR(20) NOT NULL,
+            amount NUMERIC(12,2) NOT NULL CHECK (amount >= 0),
+            processed_at TIMESTAMPTZ);
+            CREATE TABLE IF NOT EXISTS public.processed_event
+            (event_id VARCHAR(100) PRIMARY KEY,
+            event_type VARCHAR(100) NOT NULL,
+            processed_at TIMESTAMPTZ NOT NULL DEFAULT now());
+            ALTER TABLE public.app_user OWNER TO {{ postgresql_owner }};
+            ALTER TABLE public.ticket_event OWNER TO {{ postgresql_owner }};
+            ALTER TABLE public.seat OWNER TO {{ postgresql_owner }};
+            ALTER TABLE public.booking OWNER TO {{ postgresql_owner }};
+            ALTER TABLE public.booking_seat OWNER TO {{ postgresql_owner }};
+            ALTER TABLE public.payment OWNER TO {{ postgresql_owner }};
+            ALTER TABLE public.processed_event OWNER TO {{ postgresql_owner }};
+            ALTER SEQUENCE IF EXISTS public.app_user_id_seq OWNER TO {{ postgresql_owner }};
+            ALTER SEQUENCE IF EXISTS public.ticket_event_id_seq OWNER TO {{ postgresql_owner }};
+            ALTER SEQUENCE IF EXISTS public.seat_id_seq OWNER TO {{ postgresql_owner }};
+            ALTER SEQUENCE IF EXISTS public.booking_id_seq OWNER TO {{ postgresql_owner }};
+            ALTER SEQUENCE IF EXISTS public.payment_id_seq OWNER TO {{ postgresql_owner }};
+            GRANT USAGE, CREATE ON SCHEMA public TO {{ postgresql_owner }};
+            GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO {{ postgresql_owner }};
+            GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO {{ postgresql_owner }};
+      changed_when: false
+
+    - name: Verify all initial application tables exist
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - --namespace
+          - "{{ data_namespace }}"
+          - exec
+          - "{{ postgresql_primary.stdout }}"
+          - --
+          - env
+          - "PGPASSWORD={{ postgresql_password }}"
+          - psql
+          - --host
+          - 127.0.0.1
+          - --username
+          - "{{ postgresql_owner }}"
+          - --dbname
+          - "{{ postgresql_database }}"
+          - --tuples-only
+          - --no-align
+          - --command
+          - >-
+            SELECT count(*) FROM information_schema.tables
+            WHERE table_schema='public'
+            AND table_name IN ('app_user','ticket_event','seat','booking',
+            'booking_seat','payment','processed_event');
+      register: postgresql_schema_count
+      changed_when: false
+      no_log: true
+
+    - name: Require PostgreSQL connectivity and schema validation to pass
+      ansible.builtin.assert:
+        that:
+          - (pg_isready.rc | int) == 0
+          - (postgresql_schema_count.stdout | trim | int) == 7
+        success_msg: >-
+          PostgreSQL HA is complete: one Primary and two Standbys are Ready on three
+          different Workers, PVCs are Bound, and seven ticketing tables are initialized.
+        fail_msg: >-
+          PostgreSQL validation failed. pg_isready rc={{ pg_isready.rc }},
+          application table count={{ postgresql_schema_count.stdout | trim }} (expected 7).
+
+    - name: Print PostgreSQL application endpoints
+      ansible.builtin.debug:
+        msg:
+          - >-
+            Read/write DNS: {{ postgresql_cluster_name }}-rw.{{ data_namespace }}.svc.cluster.local:5432
+          - >-
+            Read-only DNS: {{ postgresql_cluster_name }}-ro.{{ data_namespace }}.svc.cluster.local:5432
+          - "Database/User: {{ postgresql_database }}/{{ postgresql_owner }}"
+          - "Password Secret: {{ data_namespace }}/ticketing-postgresql-app key=password"
+          - "HA: 3 instances distributed across 3 Workers with automatic primary failover."

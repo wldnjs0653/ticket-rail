@@ -1,0 +1,9 @@
+---
+# bootstrap.yml is intentionally separate: Ansible must install kubernetes.core
+# before it can parse the Kubernetes modules imported below.
+- ansible.builtin.import_playbook: prerequisites.yml
+- ansible.builtin.import_playbook: redis.yml
+- ansible.builtin.import_playbook: postgresql.yml
+- ansible.builtin.import_playbook: kafka.yml
+- ansible.builtin.import_playbook: monitoring.yml
+- ansible.builtin.import_playbook: validate.yml

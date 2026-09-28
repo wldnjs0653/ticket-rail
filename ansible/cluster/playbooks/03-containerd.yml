@@ -1,0 +1,117 @@
+---
+- name: Install and configure containerd
+  hosts: k8s
+  become: true
+  gather_facts: true
+
+  vars:
+    containerd_version: "2.3.1"
+    cni_version: "1.9.1"
+
+  tasks:
+
+    - name: Install required packages
+      ansible.builtin.dnf:
+        name:
+          - curl
+          - wget
+          - tar
+          - gzip
+          - runc
+        state: present
+
+    - name: Create containerd directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - /usr/local/bin
+        - /etc/containerd
+        - /opt/cni/bin
+
+    - name: Download containerd
+      ansible.builtin.get_url:
+        url: "https://github.com/containerd/containerd/releases/download/v{{ containerd_version }}/containerd-{{ containerd_version }}-linux-amd64.tar.gz"
+        dest: "/tmp/containerd-{{ containerd_version }}.tar.gz"
+        mode: "0644"
+
+    - name: Install containerd binaries
+      ansible.builtin.unarchive:
+        src: "/tmp/containerd-{{ containerd_version }}.tar.gz"
+        dest: /usr/local
+        remote_src: true
+
+    - name: Generate containerd configuration
+      ansible.builtin.shell:
+        cmd: |
+          containerd config default > /etc/containerd/config.toml
+        creates: /etc/containerd/config.toml
+
+    - name: Configure systemd cgroup
+      ansible.builtin.replace:
+        path: /etc/containerd/config.toml
+        regexp: 'SystemdCgroup = false'
+        replace: 'SystemdCgroup = true'
+
+    - name: Download CNI plugins
+      ansible.builtin.get_url:
+        url: "https://github.com/containernetworking/plugins/releases/download/v{{ cni_version }}/cni-plugins-linux-amd64-v{{ cni_version }}.tgz"
+        dest: "/tmp/cni-plugins-v{{ cni_version }}.tgz"
+        mode: "0644"
+
+    - name: Install CNI plugins
+      ansible.builtin.unarchive:
+        src: "/tmp/cni-plugins-v{{ cni_version }}.tgz"
+        dest: /opt/cni/bin
+        remote_src: true
+
+    - name: Create containerd systemd service directory
+      ansible.builtin.file:
+        path: /usr/local/lib/systemd/system
+        state: directory
+        mode: "0755"
+
+    - name: Create containerd systemd service
+      ansible.builtin.copy:
+        dest: /usr/local/lib/systemd/system/containerd.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=containerd container runtime
+          Documentation=https://containerd.io
+          After=network.target local-fs.target
+
+          [Service]
+          ExecStart=/usr/local/bin/containerd
+          Type=notify
+          Delegate=yes
+          KillMode=process
+          Restart=always
+          RestartSec=5
+          LimitNPROC=infinity
+          LimitCORE=infinity
+          LimitNOFILE=infinity
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Enable and start containerd
+      ansible.builtin.systemd:
+        name: containerd
+        enabled: true
+        state: started
+
+    - name: Verify containerd
+      ansible.builtin.command:
+        cmd: containerd --version
+      register: containerd_version_result
+      changed_when: false
+
+    - name: Show containerd version
+      ansible.builtin.debug:
+        msg: "{{ containerd_version_result.stdout }}"

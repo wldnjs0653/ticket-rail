@@ -1,0 +1,28 @@
+base_url: https://api.example.com
+event_id: 1
+seat_id: null
+user_ids: []
+
+data_namespace: data
+postgres_cluster: ticketing-postgresql
+postgres_container: postgres
+postgres_database: ticketing
+postgres_user: postgres
+available_seat_status: AVAILABLE
+confirmed_booking_status: CONFIRMED
+booked_seat_status: BOOKED
+approved_payment_status: APPROVED
+
+start_delay_ms: 3000
+max_start_lateness_ms: 100
+queue_max_wait_seconds: 60
+queue_poll_seconds: 5
+request_timeout_seconds: 10
+db_poll_attempts: 24
+db_poll_seconds: 5
+
+prometheus_remote_write_url: ""
+tls_ca_file: ""
+k6_binary: k6
+kubectl_binary: kubectl
+result_root: "{{ playbook_dir }}/results"

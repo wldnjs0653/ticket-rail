@@ -1,0 +1,43 @@
+# Ticketing Infrastructure Failure-Test Report
+
+- Run ID: {{ failure_test_run_id }}
+- Generated UTC: {{ lookup('pipe', 'date -u -Ins') }}
+- Worker target: {{ worker_failure_target }}
+- Master target: {{ master_failure_target }}
+- API VIP: {{ kubernetes_api_vip }}
+- Service VIP: {{ service_vip }}
+
+## Scenario Results
+
+Status meanings: `PASS_NO_IMPACT` = no probe failure observed,
+`PASS_WITH_IMPACT` = recovered with failed requests, `PASS` = direct data-service
+validation passed, and `FAIL` = execution or recovery validation failed.
+
+{% if failure_results | default({}) | length == 0 %}
+No scenario result was recorded. Review the captured state files.
+{% else %}
+{% for name, result in failure_results.items() %}
+### {{ name }}
+
+```json
+{{ result | to_nice_json }}
+```
+
+{% endfor %}
+{% endif %}
+
+## Evidence Files
+
+- nodes.txt
+- result.json
+- pods.txt
+- deployments.txt
+- statefulsets.txt
+- pvc.txt
+- cnpg.txt
+- kafka.txt
+- redis.txt
+- final-report.md
+
+Probe samples and scenario-specific outputs are stored in the same directory.
+

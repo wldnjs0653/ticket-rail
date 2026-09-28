@@ -1,0 +1,185 @@
+{% set workloads = [
+  {'name': 'mock-payment', 'image': mock_payment_image, 'port': mock_payment_port, 'port_env': 'PORT', 'service': true, 'env': []},
+  {'name': 'mock-notification', 'image': mock_notification_image, 'port': mock_notification_port, 'port_env': 'PORT', 'service': true, 'env': []},
+  {
+    'name': 'payment-consumer', 'image': payment_consumer_image,
+    'port': payment_consumer_port, 'port_env': 'HTTP_PORT', 'service': false,
+    'env': [
+      {'name': 'KAFKA_BROKERS', 'value': kafka_bootstrap},
+      {'name': 'KAFKA_CLIENT_ID', 'value': 'ticketing-payment-consumer'},
+      {'name': 'KAFKA_GROUP_ID', 'value': 'ticketing-payment-consumer-v1'},
+      {'name': 'BOOKING_TOPIC', 'value': booking_topic},
+      {'name': 'PAYMENT_TOPIC', 'value': payment_topic},
+      {'name': 'MOCK_PAYMENT_URL', 'value': 'http://mock-payment.' ~ app_namespace ~ ':' ~ mock_payment_port}
+    ]
+  },
+  {
+    'name': 'notification-consumer', 'image': notification_consumer_image,
+    'port': notification_consumer_port, 'port_env': 'HTTP_PORT', 'service': false,
+    'env': [
+      {'name': 'KAFKA_BROKERS', 'value': kafka_bootstrap},
+      {'name': 'KAFKA_CLIENT_ID', 'value': 'ticketing-notification-consumer'},
+      {'name': 'KAFKA_GROUP_ID', 'value': 'ticketing-notification-consumer-v1'},
+      {'name': 'PAYMENT_TOPIC', 'value': payment_topic},
+      {'name': 'MOCK_NOTIFICATION_URL', 'value': 'http://mock-notification.' ~ app_namespace ~ ':' ~ mock_notification_port}
+    ]
+  },
+  {
+    'name': 'payment-consumer-v2', 'image': backend_consumer_image,
+    'port': backend_consumer_port, 'port_env': 'PORT', 'service': false,
+    'pull': 'IfNotPresent',
+    'pull_secret': 'ghcr-pull-secret',
+    'secret': backend_consumer_secret,
+    'command': ['node', 'src/consumers/main.js'],
+    'env': [
+      {'name': 'KAFKA_BROKERS', 'value': kafka_bootstrap},
+      {'name': 'KAFKA_CLIENT_ID', 'value': 'ticketing-backend-consumer'},
+      {'name': 'KAFKA_CONSUMER_GROUP', 'value': 'ticketing-backend-consumer-v1'},
+      {'name': 'PG_HOST', 'value': 'ticketing-postgresql-rw.data'},
+      {'name': 'PG_PORT', 'value': '5432'},
+      {'name': 'PG_DATABASE', 'value': 'ticketing'},
+      {'name': 'REDIS_SENTINELS', 'value': 'redis-sentinel.data:26379'},
+      {'name': 'REDIS_SENTINEL_MASTER', 'value': 'ticketing-master'},
+      {'name': 'SKIP_KAFKA_CONSUMERS', 'value': 'false'}
+    ]
+  }
+] %}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ app_namespace }}
+  labels:
+    app.kubernetes.io/part-of: ticketing-platform
+---
+{% for workload in workloads %}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ workload.name }}
+  namespace: {{ app_namespace }}
+  labels:
+    app.kubernetes.io/name: {{ workload.name }}
+    app.kubernetes.io/part-of: ticketing-platform
+spec:
+  replicas: {{ app_replica_count }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ workload.name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ workload.name }}
+        app.kubernetes.io/part-of: ticketing-platform
+      annotations:
+        ticketing.io/deployment-revision: "{{ deployment_revision }}"
+    spec:
+      terminationGracePeriodSeconds: 30
+{% if workload.pull_secret is defined %}
+      imagePullSecrets:
+        - name: {{ workload.pull_secret }}
+{% endif %}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: {{ workload.name }}
+      containers:
+        - name: {{ workload.name }}
+          image: {{ workload.image }}
+          imagePullPolicy: {{ workload.pull | default('Never') }}
+{% if workload.command is defined %}
+          command: {{ workload.command | to_json }}
+{% endif %}
+          ports:
+            - name: http
+              containerPort: {{ workload.port }}
+          env:
+            - name: {{ workload.port_env }}
+              value: "{{ workload.port }}"
+{% for variable in workload.env %}
+            - name: {{ variable.name }}
+              value: "{{ variable.value }}"
+{% endfor %}
+{% if workload.secret is defined %}
+          envFrom:
+            - secretRef:
+                name: {{ workload.secret }}
+{% endif %}
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ workload.name }}
+  namespace: {{ app_namespace }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ workload.name }}
+{% if workload.service %}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ workload.name }}
+  namespace: {{ app_namespace }}
+  labels:
+    app.kubernetes.io/name: {{ workload.name }}
+    app.kubernetes.io/part-of: ticketing-platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ workload.name }}
+  ports:
+    - name: http
+      port: {{ workload.port }}
+      targetPort: http
+{% endif %}
+{% if not loop.last %}
+---
+{% endif %}
+{% endfor %}

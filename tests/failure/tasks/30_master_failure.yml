@@ -1,0 +1,215 @@
+---
+- name: Define Master failure evidence paths
+  ansible.builtin.set_fact:
+    master_probe_output: "{{ failure_test_run_dir }}/master-failure-probe.jsonl"
+    master_probe_stop_file: "{{ failure_test_run_dir }}/master-failure.stop"
+
+- name: Remove a previous Master probe stop file
+  ansible.builtin.file:
+    path: "{{ master_probe_stop_file }}"
+    state: absent
+
+- name: Start continuous Kubernetes API requests
+  ansible.builtin.command:
+    argv:
+      - "{{ python_bin }}"
+      - "{{ playbook_dir }}/../scripts/probe_command.py"
+      - --interval
+      - "{{ probe_interval_seconds | string }}"
+      - --max-duration
+      - "300"
+      - --stop-file
+      - "{{ master_probe_stop_file }}"
+      - --output
+      - "{{ master_probe_output }}"
+      - --
+      - "{{ kubectl_bin }}"
+      - --kubeconfig
+      - "{{ kubeconfig_path }}"
+      - get
+      - --raw=/readyz
+  async: 330
+  poll: 0
+  register: master_probe_job
+  changed_when: true
+
+- name: Allow Kubernetes API baseline samples
+  ansible.builtin.wait_for:
+    timeout: 3
+  changed_when: false
+
+- name: Record the Master fault start time
+  ansible.builtin.command:
+    argv: [date, "+%s%3N"]
+  register: master_fault_start_ms
+  changed_when: false
+
+- name: Simulate and recover one Control Plane failure
+  block:
+    - name: Stop kubelet on the Master
+      ansible.builtin.systemd_service:
+        name: kubelet
+        state: stopped
+      delegate_to: "{{ master_failure_target }}"
+      become: true
+
+    - name: Stop containerd on the Master
+      ansible.builtin.systemd_service:
+        name: containerd
+        state: stopped
+      delegate_to: "{{ master_failure_target }}"
+      become: true
+
+    - name: Wait until the Master is NotReady
+      ansible.builtin.command:
+        argv:
+          - "{{ kubectl_bin }}"
+          - get
+          - node
+          - "{{ master_failure_target }}"
+          - -o
+          - 'jsonpath={.status.conditions[?(@.type=="Ready")].status}'
+      register: master_ready_during_fault
+      changed_when: false
+      until:
+        - master_ready_during_fault.rc == 0
+        - master_ready_during_fault.stdout | trim in ['False', 'Unknown']
+      retries: "{{ (node_notready_timeout_seconds / 2) | int }}"
+      delay: 2
+
+    - name: Record when the Master became NotReady
+      ansible.builtin.command:
+        argv: [date, "+%s%3N"]
+      register: master_notready_ms
+      changed_when: false
+
+    - name: Require the remaining Masters to stay Ready
+      ansible.builtin.shell: |
+        set -euo pipefail
+        for node in {{ (groups['control_plane'] | difference([master_failure_target])) | join(' ') }}; do
+          status=$("{{ kubectl_bin }}" get node "$node" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+          [[ "$status" == "True" ]] || { echo "$node Ready=$status" >&2; exit 1; }
+        done
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Require API readiness and the etcd readiness check during the fault
+      ansible.builtin.command:
+        argv:
+          - "{{ kubectl_bin }}"
+          - --request-timeout=2s
+          - get
+          - "--raw=/readyz?verbose"
+      register: master_readyz_verbose
+      changed_when: false
+      failed_when: >-
+        master_readyz_verbose.rc != 0
+        or '[+]etcd ok' not in master_readyz_verbose.stdout
+
+    - name: Hold the Master outage briefly
+      ansible.builtin.wait_for:
+        timeout: 5
+      changed_when: false
+
+  always:
+    - name: Record the Master restore command time
+      ansible.builtin.command:
+        argv: [date, "+%s%3N"]
+      register: master_restore_start_ms
+      changed_when: false
+
+    - name: Start containerd on the Master
+      ansible.builtin.systemd_service:
+        name: containerd
+        state: started
+        enabled: true
+      delegate_to: "{{ master_failure_target }}"
+      become: true
+
+    - name: Start kubelet on the Master
+      ansible.builtin.systemd_service:
+        name: kubelet
+        state: started
+        enabled: true
+      delegate_to: "{{ master_failure_target }}"
+      become: true
+
+    - name: Wait for the Master to recover
+      ansible.builtin.command:
+        argv:
+          - "{{ kubectl_bin }}"
+          - wait
+          - --for=condition=Ready
+          - "node/{{ master_failure_target }}"
+          - "--timeout={{ node_ready_timeout_seconds }}s"
+      changed_when: false
+
+- name: Record the Master recovery time
+  ansible.builtin.command:
+    argv: [date, "+%s%3N"]
+  register: master_fault_end_ms
+  changed_when: false
+
+- name: Collect stable API responses after Master recovery
+  ansible.builtin.wait_for:
+    timeout: 4
+  changed_when: false
+
+- name: Stop the Kubernetes API probe
+  ansible.builtin.file:
+    path: "{{ master_probe_stop_file }}"
+    state: touch
+    mode: "0640"
+
+- name: Wait for the Master failure probe job
+  ansible.builtin.async_status:
+    jid: "{{ master_probe_job.ansible_job_id }}"
+  register: master_probe_job_status
+  until: master_probe_job_status.finished
+  retries: 30
+  delay: 1
+  changed_when: false
+
+- name: Analyze the Master failure probe
+  ansible.builtin.command:
+    argv:
+      - "{{ python_bin }}"
+      - "{{ playbook_dir }}/../scripts/analyze_probe.py"
+      - --input
+      - "{{ master_probe_output }}"
+      - --stable-successes
+      - "{{ stable_success_count | string }}"
+      - --fault-time-ms
+      - "{{ master_fault_start_ms.stdout }}"
+  register: master_probe_analysis
+  changed_when: false
+
+- name: Parse the Master API probe summary
+  ansible.builtin.set_fact:
+    master_probe_summary: "{{ master_probe_analysis.stdout | from_json }}"
+
+- name: Record the Control Plane result
+  ansible.builtin.set_fact:
+    failure_results: >-
+      {{
+        failure_results | combine({
+          'control_plane_failure': {
+            'status': ((master_probe_summary.failures | int) == 0)
+              | ternary('PASS_NO_IMPACT', 'PASS_WITH_IMPACT'),
+            'target': master_failure_target,
+            'fault_at_epoch_ms': master_fault_start_ms.stdout | int,
+            'notready_at_epoch_ms': master_notready_ms.stdout | int,
+            'restore_started_at_epoch_ms': master_restore_start_ms.stdout | int,
+            'recovered_at_epoch_ms': master_fault_end_ms.stdout | int,
+            'etcd_ready_during_fault': true,
+            'node_recovery_seconds':
+              (((master_fault_end_ms.stdout | int) - (master_fault_start_ms.stdout | int)) / 1000) | round(3),
+            'restore_recovery_seconds':
+              (((master_fault_end_ms.stdout | int) - (master_restore_start_ms.stdout | int)) / 1000) | round(3),
+            'api_probe': master_probe_summary
+          }
+        })
+      }}
+
+

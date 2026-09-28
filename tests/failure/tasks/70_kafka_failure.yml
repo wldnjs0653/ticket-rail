@@ -1,0 +1,244 @@
+---
+- name: Define the Kafka failure-test topic
+  ansible.builtin.set_fact:
+    kafka_test_topic: "failure-test-{{ failure_test_run_id | lower | regex_replace('[^a-z0-9-]', '-') }}"
+
+- name: Find a running Kafka Broker Pod
+  ansible.builtin.shell: |
+    set -euo pipefail
+    "{{ kubectl_bin }}" get pod -n "{{ data_namespace }}"       -l "strimzi.io/name={{ kafka_cluster }}-kafka"       --field-selector=status.phase=Running       -o jsonpath='{.items[0].metadata.name}'
+  args:
+    executable: /bin/bash
+  register: kafka_broker_before
+  changed_when: false
+  failed_when: kafka_broker_before.stdout | trim == ""
+
+- name: Read the Kafka Broker UID before deletion
+  ansible.builtin.command:
+    argv:
+      - "{{ kubectl_bin }}"
+      - get
+      - pod
+      - "{{ kafka_broker_before.stdout | trim }}"
+      - -n
+      - "{{ data_namespace }}"
+      - -o
+      - "jsonpath={.metadata.uid}"
+  register: kafka_broker_uid_before
+  changed_when: false
+  failed_when: kafka_broker_uid_before.stdout | trim == ""
+
+- name: Create the temporary replicated Kafka topic
+  ansible.builtin.command:
+    argv:
+      - "{{ kubectl_bin }}"
+      - exec
+      - -n
+      - "{{ data_namespace }}"
+      - "{{ kafka_broker_before.stdout | trim }}"
+      - --
+      - /opt/kafka/bin/kafka-topics.sh
+      - --bootstrap-server
+      - "{{ kafka_cluster }}-kafka-bootstrap:9092"
+      - --create
+      - --if-not-exists
+      - --topic
+      - "{{ kafka_test_topic }}"
+      - --partitions
+      - "1"
+      - --replication-factor
+      - "3"
+  changed_when: true
+
+- name: Produce the Kafka marker before the fault
+  ansible.builtin.shell: |
+    set -euo pipefail
+    printf 'before-{{ failure_test_run_id }}\n' |
+      "{{ kubectl_bin }}" exec -i -n "{{ data_namespace }}" "{{ kafka_broker_before.stdout | trim }}" --       /opt/kafka/bin/kafka-console-producer.sh       --bootstrap-server "{{ kafka_cluster }}-kafka-bootstrap:9092"       --topic "{{ kafka_test_topic }}"
+  args:
+    executable: /bin/bash
+  changed_when: true
+
+- name: Record the Kafka fault start time
+  ansible.builtin.command:
+    argv: [date, "+%s%3N"]
+  register: kafka_fault_start_ms
+  changed_when: false
+
+- name: Delete one Kafka Broker Pod
+  ansible.builtin.command:
+    argv:
+      - "{{ kubectl_bin }}"
+      - delete
+      - pod
+      - "{{ kafka_broker_before.stdout | trim }}"
+      - -n
+      - "{{ data_namespace }}"
+      - --wait=false
+  changed_when: true
+
+- name: Wait for a replacement Broker UID and all three Kafka Broker Pods
+  ansible.builtin.shell: |
+    set -euo pipefail
+    deadline=$((SECONDS + {{ data_failover_timeout_seconds }}))
+    while (( SECONDS < deadline )); do
+      rows=$("{{ kubectl_bin }}" get pod -n "{{ data_namespace }}"         -l "strimzi.io/name={{ kafka_cluster }}-kafka"         -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.metadata.uid}{"|"}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' 2>/dev/null || true)
+      total=$(printf '%s\n' "$rows" | sed '/^$/d' | wc -l)
+      ready=$(printf '%s\n' "$rows" | awk -F'|' '$3 == "True" {count++} END {print count+0}')
+      old_present=$(printf '%s\n' "$rows" | awk -F'|' -v old="{{ kafka_broker_uid_before.stdout | trim }}" '$2 == old {found=1} END {print found+0}')
+      if [[ "$total" -eq 3 && "$ready" -eq 3 && "$old_present" -eq 0 ]]; then
+        exit 0
+      fi
+      sleep 2
+    done
+    exit 1
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Wait for the Kafka custom resource to be Ready
+  ansible.builtin.command:
+    argv:
+      - "{{ kubectl_bin }}"
+      - wait
+      - --for=condition=Ready
+      - "kafka/{{ kafka_cluster }}"
+      - -n
+      - "{{ data_namespace }}"
+      - "--timeout={{ data_failover_timeout_seconds }}s"
+  changed_when: false
+
+- name: Record the Kafka recovery time
+  ansible.builtin.command:
+    argv: [date, "+%s%3N"]
+  register: kafka_fault_end_ms
+  changed_when: false
+
+- name: Find a Kafka Broker Pod after recovery
+  ansible.builtin.shell: |
+    set -euo pipefail
+    "{{ kubectl_bin }}" get pod -n "{{ data_namespace }}"       -l "strimzi.io/name={{ kafka_cluster }}-kafka"       --field-selector=status.phase=Running       -o jsonpath='{.items[0].metadata.name}'
+  args:
+    executable: /bin/bash
+  register: kafka_broker_after
+  changed_when: false
+  failed_when: kafka_broker_after.stdout | trim == ""
+
+- name: Require the temporary Topic ISR to contain all three replicas
+  ansible.builtin.shell: |
+    set -euo pipefail
+    description=$("{{ kubectl_bin }}" exec -n "{{ data_namespace }}" "{{ kafka_broker_after.stdout | trim }}" -- \
+      /opt/kafka/bin/kafka-topics.sh \
+      --bootstrap-server "{{ kafka_cluster }}-kafka-bootstrap:9092" \
+      --describe --topic "{{ kafka_test_topic }}")
+    printf '%s\n' "$description"
+    isr=$(printf '%s\n' "$description" | awk -F'Isr: ' '/Partition:/ {split($2, a, " "); print a[1]; exit}')
+    [[ -n "$isr" ]] || exit 1
+    members=$(awk -F',' '{print NF}' <<< "$isr")
+    [[ "$members" -eq 3 ]]
+  args:
+    executable: /bin/bash
+  register: kafka_topic_isr
+  changed_when: false
+
+- name: Read the replacement Kafka Broker UID
+  ansible.builtin.command:
+    argv:
+      - "{{ kubectl_bin }}"
+      - get
+      - pod
+      - "{{ kafka_broker_before.stdout | trim }}"
+      - -n
+      - "{{ data_namespace }}"
+      - -o
+      - "jsonpath={.metadata.uid}"
+  register: kafka_broker_uid_after
+  changed_when: false
+  failed_when: >-
+    (kafka_broker_uid_after.stdout | trim) == ''
+    or (kafka_broker_uid_after.stdout | trim) == (kafka_broker_uid_before.stdout | trim)
+
+- name: Record the final Kafka recovery time
+  ansible.builtin.command:
+    argv: [date, "+%s%3N"]
+  register: kafka_final_ms
+  changed_when: false
+
+- name: Produce the Kafka marker after recovery
+  ansible.builtin.shell: |
+    set -euo pipefail
+    printf 'after-{{ failure_test_run_id }}\n' |
+      "{{ kubectl_bin }}" exec -i -n "{{ data_namespace }}" "{{ kafka_broker_after.stdout | trim }}" --       /opt/kafka/bin/kafka-console-producer.sh       --bootstrap-server "{{ kafka_cluster }}-kafka-bootstrap:9092"       --topic "{{ kafka_test_topic }}"
+  args:
+    executable: /bin/bash
+  changed_when: true
+
+- name: Consume both Kafka markers
+  ansible.builtin.command:
+    argv:
+      - "{{ kubectl_bin }}"
+      - exec
+      - -n
+      - "{{ data_namespace }}"
+      - "{{ kafka_broker_after.stdout | trim }}"
+      - --
+      - /opt/kafka/bin/kafka-console-consumer.sh
+      - --bootstrap-server
+      - "{{ kafka_cluster }}-kafka-bootstrap:9092"
+      - --topic
+      - "{{ kafka_test_topic }}"
+      - --from-beginning
+      - --max-messages
+      - "2"
+      - --timeout-ms
+      - "30000"
+  register: kafka_consumed_markers
+  changed_when: false
+  failed_when: >-
+    kafka_consumed_markers.rc != 0
+    or ('before-' + failure_test_run_id) not in kafka_consumed_markers.stdout
+    or ('after-' + failure_test_run_id) not in kafka_consumed_markers.stdout
+
+- name: Delete the temporary Kafka topic
+  ansible.builtin.command:
+    argv:
+      - "{{ kubectl_bin }}"
+      - exec
+      - -n
+      - "{{ data_namespace }}"
+      - "{{ kafka_broker_after.stdout | trim }}"
+      - --
+      - /opt/kafka/bin/kafka-topics.sh
+      - --bootstrap-server
+      - "{{ kafka_cluster }}-kafka-bootstrap:9092"
+      - --delete
+      - --if-exists
+      - --topic
+      - "{{ kafka_test_topic }}"
+  changed_when: true
+  failed_when: false
+
+- name: Record the Kafka Broker result
+  ansible.builtin.set_fact:
+    failure_results: >-
+      {{
+        failure_results | combine({
+          'kafka_broker_failure': {
+            'status': 'PASS',
+            'deleted_broker': kafka_broker_before.stdout | trim,
+            'deleted_broker_uid': kafka_broker_uid_before.stdout | trim,
+            'replacement_broker_uid': kafka_broker_uid_after.stdout | trim,
+            'fault_at_epoch_ms': kafka_fault_start_ms.stdout | int,
+            'recovered_at_epoch_ms': kafka_fault_end_ms.stdout | int,
+            'final_at_epoch_ms': kafka_final_ms.stdout | int,
+            'recovery_seconds':
+              (((kafka_fault_end_ms.stdout | int) - (kafka_fault_start_ms.stdout | int)) / 1000) | round(3),
+            'full_recovery_seconds':
+              (((kafka_final_ms.stdout | int) - (kafka_fault_start_ms.stdout | int)) / 1000) | round(3),
+            'messages_preserved': true,
+            'isr_member_count': 3
+          }
+        })
+      }}
+
+

@@ -1,0 +1,9 @@
+{
+  "name": "@ticketing/payment-consumer",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": { "start": "node src/index.js", "test": "node --test" },
+  "dependencies": { "kafkajs": "2.2.4" }
+}

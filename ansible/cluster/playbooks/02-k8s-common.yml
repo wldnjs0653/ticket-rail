@@ -1,0 +1,17 @@
+---
+- name: Kubernetes common setup
+  hosts: k8s
+  become: true
+  gather_facts: true
+
+  tasks:
+
+    - name: Disable swap immediately
+      ansible.builtin.command:
+        cmd: swapoff -a
+
+    - name: Disable swap in fstab
+      ansible.builtin.replace:
+        path: /etc/fstab
+        regexp: '^(\s*[^#]\S+\s+\S+\s+swap\s+.*)$'
+        replace: '# \1'

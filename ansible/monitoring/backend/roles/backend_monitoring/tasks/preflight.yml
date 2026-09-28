@@ -1,0 +1,104 @@
+---
+- name: Check kubeconfig file
+  ansible.builtin.stat:
+    path: "{{ kubeconfig_path }}"
+  register: kubeconfig_file_info
+
+- name: Verify kubeconfig file
+  ansible.builtin.assert:
+    that:
+      - kubeconfig_file_info.stat.exists
+      - kubeconfig_file_info.stat.isreg
+    fail_msg: "kubeconfig 파일이 없습니다: {{ kubeconfig_path }}"
+    success_msg: kubeconfig 파일 확인 완료
+
+- name: Check kubectl client
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - version
+      - --client
+  changed_when: false
+
+- name: Check ServiceMonitor CRD
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig
+      - "{{ kubeconfig_path }}"
+      - get
+      - crd
+      - servicemonitors.monitoring.coreos.com
+  register: servicemonitor_crd_check
+  changed_when: false
+  failed_when: false
+
+- name: Verify ServiceMonitor CRD
+  ansible.builtin.assert:
+    that:
+      - servicemonitor_crd_check.rc == 0
+    fail_msg: >-
+      ServiceMonitor CRD가 없습니다. 기존 모니터링 구축 담당자에게
+      kube-prometheus-stack 설치 상태를 확인해야 합니다.
+    success_msg: ServiceMonitor CRD 확인 완료
+
+- name: Check monitoring namespace
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig
+      - "{{ kubeconfig_path }}"
+      - get
+      - namespace
+      - "{{ monitoring_namespace }}"
+  register: monitoring_namespace_check
+  changed_when: false
+  failed_when: false
+
+- name: Check application namespace
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig
+      - "{{ kubeconfig_path }}"
+      - get
+      - namespace
+      - "{{ app_namespace }}"
+  register: app_namespace_check
+  changed_when: false
+  failed_when: false
+
+- name: Verify required namespaces
+  ansible.builtin.assert:
+    that:
+      - monitoring_namespace_check.rc == 0
+      - app_namespace_check.rc == 0
+    fail_msg: >-
+      monitoring 또는 app 네임스페이스가 없습니다.
+      group_vars/all.yml의 네임스페이스 설정을 확인하세요.
+    success_msg: monitoring/app 네임스페이스 확인 완료
+
+- name: Check Prometheus resource
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig
+      - "{{ kubeconfig_path }}"
+      - --namespace
+      - "{{ monitoring_namespace }}"
+      - get
+      - prometheus.monitoring.coreos.com
+      - "{{ prometheus_resource_name }}"
+  register: prometheus_resource_check
+  changed_when: false
+  failed_when: false
+
+- name: Verify Prometheus resource
+  ansible.builtin.assert:
+    that:
+      - prometheus_resource_check.rc == 0
+    fail_msg: >-
+      Prometheus 리소스를 찾지 못했습니다.
+      group_vars/all.yml의 prometheus_resource_name을 확인하세요.
+    success_msg: Prometheus 리소스 확인 완료
+

@@ -1,0 +1,14 @@
+---
+- name: Remove the isolated traffic probe Namespace
+  ansible.builtin.command:
+    argv:
+      - "{{ kubectl_bin }}"
+      - delete
+      - namespace
+      - "{{ traffic_test_namespace }}"
+      - --ignore-not-found=true
+      - --wait=true
+      - --timeout=180s
+  register: cleanup_probe_namespace
+  changed_when: "'deleted' in cleanup_probe_namespace.stdout"
+

@@ -1,0 +1,11 @@
+---
+- name: Block unsafe all-at-once failure execution
+  hosts: controller
+  gather_facts: false
+  tasks:
+    - name: Require scenario-by-scenario execution
+      ansible.builtin.fail:
+        msg: >-
+          run_all.yml은 안전을 위해 실행할 수 없습니다.
+          scripts/10_pod_autohealing.sh부터 각 시험을 하나씩 실행하고,
+          최종 상태를 확인한 뒤 다음 시험으로 진행하십시오.

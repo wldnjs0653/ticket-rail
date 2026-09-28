@@ -1,0 +1,25 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: "{{ backend_servicemonitor_name }}"
+  namespace: "{{ monitoring_namespace }}"
+  labels:
+    release: "{{ prometheus_release_name }}"
+    app.kubernetes.io/name: "{{ backend_servicemonitor_name }}"
+    app.kubernetes.io/component: metrics
+    app.kubernetes.io/managed-by: ansible
+spec:
+  namespaceSelector:
+    matchNames:
+      - "{{ app_namespace }}"
+  selector:
+    matchLabels:
+      "{{ backend_service_label_key }}": "{{ backend_service_label_value }}"
+  endpoints:
+    - port: "{{ backend_metrics_port_name }}"
+      path: "{{ backend_metrics_path }}"
+      scheme: http
+      interval: "{{ backend_metrics_interval }}"
+      scrapeTimeout: "{{ backend_metrics_scrape_timeout }}"
+

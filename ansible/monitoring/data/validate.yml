@@ -1,0 +1,180 @@
+---
+- name: Validate the complete Ticketing Data and Operations stack
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/main.yml
+  vars:
+    ansible_python_interpreter: "{{ controller_python }}"
+
+  pre_tasks:
+    - name: Run shared Kubernetes and storage checks
+      ansible.builtin.include_tasks: tasks/cluster_prerequisites.yml
+      vars:
+        required_storage_class_names: "{{ all_storage_class_names }}"
+
+  tasks:
+    - name: Read Data namespace Pods
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        api_version: v1
+        kind: Pod
+        namespace: "{{ data_namespace }}"
+      register: data_pods
+
+    - name: Read Monitoring namespace Pods
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        api_version: v1
+        kind: Pod
+        namespace: "{{ monitoring_namespace }}"
+      register: monitoring_pods
+
+    - name: Require no failed, unknown, or pending Data Pods
+      ansible.builtin.assert:
+        that:
+          - data_pods.resources | map(attribute='status.phase') | select('equalto', 'Failed') | list | length == 0
+          - data_pods.resources | map(attribute='status.phase') | select('equalto', 'Unknown') | list | length == 0
+          - data_pods.resources | map(attribute='status.phase') | select('equalto', 'Pending') | list | length == 0
+        fail_msg: "One or more Data namespace Pods are Failed, Unknown, or Pending."
+
+    - name: Require no failed, unknown, or pending Monitoring Pods
+      ansible.builtin.assert:
+        that:
+          - monitoring_pods.resources | map(attribute='status.phase') | select('equalto', 'Failed') | list | length == 0
+          - monitoring_pods.resources | map(attribute='status.phase') | select('equalto', 'Unknown') | list | length == 0
+          - monitoring_pods.resources | map(attribute='status.phase') | select('equalto', 'Pending') | list | length == 0
+        fail_msg: "One or more Monitoring namespace Pods are Failed, Unknown, or Pending."
+
+    - name: Read all Data PVCs
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        api_version: v1
+        kind: PersistentVolumeClaim
+        namespace: "{{ data_namespace }}"
+      register: data_pvcs
+
+    - name: Read all Monitoring PVCs
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        api_version: v1
+        kind: PersistentVolumeClaim
+        namespace: "{{ monitoring_namespace }}"
+      register: monitoring_pvcs
+
+    - name: Require all expected Data PVCs to be Bound
+      ansible.builtin.assert:
+        that:
+          - (data_pvcs.resources | length) >= ((redis_replicas | int) + (postgresql_instances | int) + (kafka_replicas | int))
+          - data_pvcs.resources | map(attribute='status.phase') | reject('equalto', 'Bound') | list | length == 0
+        fail_msg: "The nine Redis, PostgreSQL, and Kafka PVCs are not all present and Bound."
+
+    - name: Require all expected Monitoring PVCs to be Bound
+      ansible.builtin.assert:
+        that:
+          - monitoring_pvcs.resources | length >= 3
+          - monitoring_pvcs.resources | map(attribute='status.phase') | reject('equalto', 'Bound') | list | length == 0
+        fail_msg: "Prometheus, Grafana, or Loki PVC is missing or not Bound."
+
+    - name: Verify the application-facing ClusterIP Services
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        api_version: v1
+        kind: Service
+        namespace: "{{ data_namespace }}"
+        name: "{{ item }}"
+      register: application_services
+      loop:
+        - redis-sentinel
+        - "{{ postgresql_cluster_name }}-rw"
+        - "{{ kafka_cluster_name }}-kafka-bootstrap"
+
+    - name: Require every application-facing Service
+      ansible.builtin.assert:
+        that:
+          - application_services.results | map(attribute='resources') | map('length') | min == 1
+        fail_msg: "A required Redis, PostgreSQL, or Kafka Service is missing."
+
+    - name: Read Redis, PostgreSQL, and Kafka Worker placement
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - --namespace
+          - "{{ data_namespace }}"
+          - get
+          - pod
+          - --selector
+          - "{{ item.selector }}"
+          - --output
+          - 'jsonpath={range .items[*]}{.spec.nodeName}{"\n"}{end}'
+      loop:
+        - name: Redis
+          selector: app.kubernetes.io/name=redis
+        - name: PostgreSQL
+          selector: "cnpg.io/cluster={{ postgresql_cluster_name }}"
+        - name: Kafka
+          selector: "strimzi.io/pool-name={{ kafka_node_pool_name }}"
+      register: data_service_placements
+      changed_when: false
+
+    - name: Require every data service to span three Workers
+      ansible.builtin.assert:
+        that:
+          - (item.stdout_lines | reject('equalto', '') | list | length) == (ha_replica_count | int)
+          - (item.stdout_lines | reject('equalto', '') | unique | list | length) == (ha_replica_count | int)
+        fail_msg: >-
+          {{ item.item.name }} does not have exactly three Pods on three different
+          Worker nodes. Check Pod anti-affinity, Local PV nodeAffinity, and resources.
+      loop: "{{ data_service_placements.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+
+    - name: Verify Resource Metrics API
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - get
+          - --raw=/apis/metrics.k8s.io/v1beta1/nodes
+      register: validation_metrics
+      changed_when: false
+
+    - name: List deployed Helm releases
+      ansible.builtin.command:
+        argv:
+          - "{{ helm_binary }}"
+          - --kubeconfig
+          - "{{ controller_kubeconfig }}"
+          - list
+          - --all-namespaces
+      register: helm_releases
+      changed_when: false
+
+    - name: Require all expected Helm releases
+      ansible.builtin.assert:
+        that:
+          - "'cnpg' in helm_releases.stdout"
+          - "'strimzi-kafka-operator' in helm_releases.stdout"
+          - "'metrics-server' in helm_releases.stdout"
+          - "'prometheus-stack' in helm_releases.stdout"
+          - "'loki' in helm_releases.stdout"
+          - "'alloy' in helm_releases.stdout"
+          - "((validation_metrics.stdout | from_json)['items'] | length) > 0"
+        success_msg: "The complete Ticketing Data and Operations stack passed final validation."
+
+    - name: Print final service summary
+      ansible.builtin.debug:
+        msg:
+          - >-
+            Redis Sentinel: redis-sentinel.{{ data_namespace }}.svc.cluster.local:26379
+            (master={{ redis_master_name }})
+          - >-
+            PostgreSQL: {{ postgresql_cluster_name }}-rw.{{ data_namespace }}.svc.cluster.local:5432
+          - >-
+            Kafka: {{ kafka_cluster_name }}-kafka-bootstrap.{{ data_namespace }}.svc.cluster.local:9092
+          - "Grafana: http://{{ grafana_host }}"
+          - "Data PVC count: {{ data_pvcs.resources | length }} (minimum 9, all Bound)"
+          - "Monitoring PVC count: {{ monitoring_pvcs.resources | length }} (all Bound)"
+          - "No uninstall or PVC deletion was performed; retained data remains protected."

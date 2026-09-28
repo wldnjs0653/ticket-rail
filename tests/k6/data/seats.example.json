@@ -1,0 +1,9 @@
+[
+  {
+    "event_id": 1,
+    "seat_id": 1001,
+    "seat_code": "A-1",
+    "required_status": "AVAILABLE",
+    "source_tables": ["ticket_event", "seat"]
+  }
+]

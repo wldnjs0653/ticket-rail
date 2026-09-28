@@ -1,0 +1,125 @@
+---
+- name: Read backend Service as JSON
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig
+      - "{{ kubeconfig_path }}"
+      - --namespace
+      - "{{ app_namespace }}"
+      - get
+      - service
+      - "{{ backend_service_name }}"
+      - --output
+      - json
+  register: backend_service_command
+  changed_when: false
+  failed_when: false
+
+- name: Stop when backend Service is missing
+  ansible.builtin.assert:
+    that:
+      - backend_service_command.rc == 0
+    fail_msg: >-
+      app/backend Service가 없습니다. CI/CD 또는 배포 담당자가
+      백엔드 Deployment와 Service를 먼저 배포해야 합니다.
+    success_msg: Backend Service 확인 완료
+
+- name: Parse backend Service JSON
+  ansible.builtin.set_fact:
+    backend_service_object: "{{ backend_service_command.stdout | from_json }}"
+
+- name: Verify backend Service label and port
+  ansible.builtin.assert:
+    that:
+      - (backend_service_object.metadata.labels | default({})).get(backend_service_label_key, '') == backend_service_label_value
+      - backend_metrics_port_name in (backend_service_object.spec.ports | map(attribute='name') | list)
+    fail_msg: >-
+      Backend Service에 필요한 라벨 또는 포트 이름이 없습니다.
+      {{ backend_service_label_key }}={{ backend_service_label_value }} 라벨과
+      {{ backend_metrics_port_name }} 포트를 CI/CD 매니페스트에 추가하세요.
+    success_msg: Backend Service 라벨과 메트릭 포트 확인 완료
+
+- name: Read backend Endpoints as JSON
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig
+      - "{{ kubeconfig_path }}"
+      - --namespace
+      - "{{ app_namespace }}"
+      - get
+      - endpoints
+      - "{{ backend_service_name }}"
+      - --output
+      - json
+  register: backend_endpoints_command
+  changed_when: false
+  failed_when: false
+
+- name: Verify backend Endpoints resource
+  ansible.builtin.assert:
+    that:
+      - backend_endpoints_command.rc == 0
+    fail_msg: Backend Endpoints 리소스가 없습니다.
+    success_msg: Backend Endpoints 리소스 확인 완료
+
+- name: Parse backend Endpoints JSON
+  ansible.builtin.set_fact:
+    backend_endpoints_object: "{{ backend_endpoints_command.stdout | from_json }}"
+
+- name: Verify Ready backend Endpoints
+  ansible.builtin.assert:
+    that:
+      - (backend_endpoints_object.subsets | default([])) | length > 0
+      - (backend_endpoints_object.subsets[0].addresses | default([])) | length > 0
+    fail_msg: >-
+      Backend Service에 연결된 Ready Pod가 없습니다.
+      backend Pod의 상태와 app=backend 라벨을 확인하세요.
+    success_msg: Backend Service Ready Endpoint 확인 완료
+
+- name: Build Prometheus query API path
+  ansible.builtin.set_fact:
+    backend_prometheus_query_path: >-
+      /api/v1/namespaces/{{ monitoring_namespace }}/services/http:{{ prometheus_service_name }}:9090/proxy/api/v1/query?query=up%7Bnamespace%3D%22{{ app_namespace }}%22%2Cservice%3D%22{{ backend_service_name }}%22%7D
+
+- name: Wait for Prometheus backend target
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig
+      - "{{ kubeconfig_path }}"
+      - get
+      - --raw
+      - "{{ backend_prometheus_query_path }}"
+  register: backend_prometheus_query
+  changed_when: false
+  retries: 12
+  delay: 5
+  until: >-
+    backend_prometheus_query.rc == 0 and
+    ((backend_prometheus_query.stdout | default('{}', true) | from_json).get('data', {}).get('result', []) | length > 0)
+
+- name: Save Prometheus backend targets
+  ansible.builtin.set_fact:
+    backend_prometheus_targets: "{{ (backend_prometheus_query.stdout | from_json).data.result }}"
+
+- name: Verify every discovered backend target is UP
+  ansible.builtin.assert:
+    that:
+      - item.value[1] | float == 1.0
+    fail_msg: "Prometheus backend target DOWN: {{ item.metric | default({}) }}"
+    success_msg: "Prometheus backend target UP: {{ item.metric | default({}) }}"
+  loop: "{{ backend_prometheus_targets }}"
+  loop_control:
+    label: "{{ item.metric.instance | default('backend') }}"
+
+- name: Backend monitoring validation summary
+  ansible.builtin.debug:
+    msg:
+      - Backend ServiceMonitor exists
+      - Backend Service label and port are valid
+      - Backend Service has Ready Endpoints
+      - Prometheus backend target is UP
+      - Grafana Explore에서 http_requests_total을 조회할 수 있습니다
+

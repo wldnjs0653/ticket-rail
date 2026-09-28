@@ -1,0 +1,251 @@
+---
+- name: Configure Kubernetes deployment access for GitHub Actions Runner
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    ansible_python_interpreter: /opt/ticket-rail-venv/bin/python
+
+    controller_kubeconfig: /root/.kube/config
+
+    runner_user: github-runner
+    runner_group: github-runner
+    runner_home: /home/github-runner
+    runner_kubeconfig: /home/github-runner/.kube/config
+
+    deploy_namespace: app
+    backend_deployment: backend
+
+    service_account_name: github-actions-deployer
+    token_secret_name: github-actions-deployer-token
+    role_name: github-actions-backend-deployer
+
+  tasks:
+    - name: Check the installed kubectl binary
+      ansible.builtin.stat:
+        path: /usr/local/bin/kubectl
+      register: kubectl_binary
+
+    - name: Require an executable kubectl binary
+      ansible.builtin.assert:
+        that:
+          - kubectl_binary.stat.exists
+          - kubectl_binary.stat.executable
+        fail_msg: /usr/local/bin/kubectl is missing or not executable.
+
+    - name: Make kubectl available in the Runner PATH
+      ansible.builtin.file:
+        src: /usr/local/bin/kubectl
+        dest: /usr/bin/kubectl
+        state: link
+        force: false
+
+    - name: Create the deployment ServiceAccount
+      kubernetes.core.k8s:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        state: present
+        apply: true
+        definition:
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: "{{ service_account_name }}"
+            namespace: "{{ deploy_namespace }}"
+
+    - name: Create the minimum backend deployment Role
+      kubernetes.core.k8s:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        state: present
+        apply: true
+        definition:
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: Role
+          metadata:
+            name: "{{ role_name }}"
+            namespace: "{{ deploy_namespace }}"
+          rules:
+            - apiGroups:
+                - apps
+              resources:
+                - deployments
+              resourceNames:
+                - "{{ backend_deployment }}"
+              verbs:
+                - get
+                - watch
+                - patch
+                - update
+
+            - apiGroups:
+                - apps
+              resources:
+                - replicasets
+              verbs:
+                - get
+                - list
+                - watch
+
+            - apiGroups:
+                - ""
+              resources:
+                - pods
+                - pods/log
+                - services
+                - endpoints
+                - events
+              verbs:
+                - get
+                - list
+                - watch
+
+    - name: Bind the Role to the deployment ServiceAccount
+      kubernetes.core.k8s:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        state: present
+        apply: true
+        definition:
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: RoleBinding
+          metadata:
+            name: "{{ role_name }}"
+            namespace: "{{ deploy_namespace }}"
+          subjects:
+            - kind: ServiceAccount
+              name: "{{ service_account_name }}"
+              namespace: "{{ deploy_namespace }}"
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: Role
+            name: "{{ role_name }}"
+
+    - name: Create the ServiceAccount token Secret
+      kubernetes.core.k8s:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        state: present
+        apply: true
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "{{ token_secret_name }}"
+            namespace: "{{ deploy_namespace }}"
+            annotations:
+              kubernetes.io/service-account.name: "{{ service_account_name }}"
+          type: kubernetes.io/service-account-token
+
+    - name: Wait for the ServiceAccount token
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        api_version: v1
+        kind: Secret
+        namespace: "{{ deploy_namespace }}"
+        name: "{{ token_secret_name }}"
+      register: runner_token_secret
+      until:
+        - runner_token_secret.resources | length == 1
+        - runner_token_secret.resources[0].data.token is defined
+        - runner_token_secret.resources[0].data['ca.crt'] is defined
+      retries: 20
+      delay: 2
+      no_log: true
+
+    - name: Read the Kubernetes API server address
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - "{{ controller_kubeconfig }}"
+          - config
+          - view
+          - --minify
+          - -o
+          - jsonpath={.clusters[0].cluster.server}
+      register: kubernetes_api_server
+      changed_when: false
+
+    - name: Create the Runner kubeconfig directory
+      ansible.builtin.file:
+        path: "{{ runner_home }}/.kube"
+        state: directory
+        owner: "{{ runner_user }}"
+        group: "{{ runner_group }}"
+        mode: "0700"
+
+    - name: Install the restricted Runner kubeconfig
+      ansible.builtin.copy:
+        dest: "{{ runner_kubeconfig }}"
+        owner: "{{ runner_user }}"
+        group: "{{ runner_group }}"
+        mode: "0600"
+        content: |
+          apiVersion: v1
+          kind: Config
+
+          clusters:
+            - name: ticketing-cluster
+              cluster:
+                server: "{{ kubernetes_api_server.stdout }}"
+                certificate-authority-data: "{{ runner_token_secret.resources[0].data['ca.crt'] }}"
+
+          users:
+            - name: "{{ service_account_name }}"
+              user:
+                token: "{{ runner_token_secret.resources[0].data.token | b64decode }}"
+
+          contexts:
+            - name: "{{ service_account_name }}@ticketing-cluster"
+              context:
+                cluster: ticketing-cluster
+                namespace: "{{ deploy_namespace }}"
+                user: "{{ service_account_name }}"
+
+          current-context: "{{ service_account_name }}@ticketing-cluster"
+      no_log: true
+
+    - name: Verify that the Runner can read the backend Deployment
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/sudo
+          - -u
+          - "{{ runner_user }}"
+          - -H
+          - /usr/bin/env
+          - "KUBECONFIG={{ runner_kubeconfig }}"
+          - /usr/bin/kubectl
+          - auth
+          - can-i
+          - get
+          - "deployment/{{ backend_deployment }}"
+          - --namespace
+          - "{{ deploy_namespace }}"
+      register: runner_can_get
+      changed_when: false
+      failed_when: runner_can_get.stdout | trim != "yes"
+
+    - name: Verify that the Runner can update the backend Deployment
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/sudo
+          - -u
+          - "{{ runner_user }}"
+          - -H
+          - /usr/bin/env
+          - "KUBECONFIG={{ runner_kubeconfig }}"
+          - /usr/bin/kubectl
+          - auth
+          - can-i
+          - patch
+          - "deployment/{{ backend_deployment }}"
+          - --namespace
+          - "{{ deploy_namespace }}"
+      register: runner_can_patch
+      changed_when: false
+      failed_when: runner_can_patch.stdout | trim != "yes"
+
+    - name: Print the access verification result
+      ansible.builtin.debug:
+        msg:
+          - "Runner Kubernetes access is configured."
+          - "get deployment/backend: {{ runner_can_get.stdout | trim }}"
+          - "patch deployment/backend: {{ runner_can_patch.stdout | trim }}"

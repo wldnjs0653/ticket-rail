@@ -1,0 +1,23 @@
+---
+# 공통 접속 정보
+kubeconfig_path: /root/.kube/config
+
+# 기존 모니터링 스택 정보
+monitoring_namespace: monitoring
+prometheus_resource_name: prometheus-stack-kube-prom-prometheus
+prometheus_service_name: prometheus-stack-kube-prom-prometheus
+prometheus_release_name: prometheus-stack
+
+# 백엔드 애플리케이션 정보
+app_namespace: app
+backend_service_name: backend
+backend_service_label_key: app
+backend_service_label_value: backend
+backend_metrics_port_name: http
+backend_metrics_path: /metrics
+
+# ServiceMonitor 설정
+backend_servicemonitor_name: backend
+backend_metrics_interval: 15s
+backend_metrics_scrape_timeout: 10s
+

@@ -1,0 +1,87 @@
+---
+- name: Render the isolated NGINX traffic probe
+  ansible.builtin.template:
+    src: ../templates/traffic-probe.yaml.j2
+    dest: "{{ failure_test_run_dir }}/traffic-probe.yaml"
+    mode: "0640"
+
+- name: Apply the isolated NGINX traffic probe
+  ansible.builtin.command:
+    argv:
+      - "{{ kubectl_bin }}"
+      - apply
+      - -f
+      - "{{ failure_test_run_dir }}/traffic-probe.yaml"
+  register: probe_apply
+  changed_when: >-
+    'created' in probe_apply.stdout
+    or 'configured' in probe_apply.stdout
+
+- name: Create a temporary TLS certificate for the isolated probe
+  ansible.builtin.shell: |
+    set -euo pipefail
+    if "{{ kubectl_bin }}" -n "{{ traffic_test_namespace }}" get secret \
+         "{{ traffic_test_tls_secret }}" >/dev/null 2>&1; then
+      printf 'existing\n'
+      exit 0
+    fi
+    tls_tmp=$(mktemp -d)
+    trap 'rm -rf -- "$tls_tmp"' EXIT
+    openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
+      -subj "/CN={{ traffic_test_host }}" \
+      -addext "subjectAltName=DNS:{{ traffic_test_host }}" \
+      -keyout "$tls_tmp/tls.key" \
+      -out "$tls_tmp/tls.crt" >/dev/null 2>&1
+    "{{ kubectl_bin }}" -n "{{ traffic_test_namespace }}" create secret tls \
+      "{{ traffic_test_tls_secret }}" \
+      --cert="$tls_tmp/tls.crt" \
+      --key="$tls_tmp/tls.key"
+  args:
+    executable: /bin/bash
+  register: traffic_tls_secret_result
+  changed_when: "'created' in traffic_tls_secret_result.stdout"
+
+- name: Wait for all traffic probe replicas
+  ansible.builtin.command:
+    argv:
+      - "{{ kubectl_bin }}"
+      - rollout
+      - status
+      - "deployment/{{ traffic_test_name }}"
+      - -n
+      - "{{ traffic_test_namespace }}"
+      - --timeout=300s
+  changed_when: false
+
+- name: Require one traffic probe Pod per Application Worker
+  ansible.builtin.shell: |
+    set -euo pipefail
+    nodes=$("{{ kubectl_bin }}" get pod -n "{{ traffic_test_namespace }}"       -l "app.kubernetes.io/name={{ traffic_test_name }}"       -o jsonpath='{range .items[*]}{.spec.nodeName}{"\n"}{end}' | sort -u)
+    count=$(printf '%s\n' "$nodes" | sed '/^$/d' | wc -l)
+    [[ "$count" -eq 3 ]] || { echo "$nodes" >&2; exit 1; }
+    printf '%s\n' "$nodes"
+  args:
+    executable: /bin/bash
+  register: probe_nodes
+  changed_when: false
+
+- name: Verify the external traffic route
+  ansible.builtin.shell: |
+    set -euo pipefail
+    curl_args=(--silent --show-error --fail --max-time 5)
+    curl_args+=(--resolve "{{ traffic_test_host }}:443:{{ traffic_test_connect_ip }}")
+    {% if not (traffic_tls_verify | bool) %}
+    curl_args+=(--insecure)
+    {% endif %}
+    body=$(curl "${curl_args[@]}" "{{ traffic_test_url }}")
+    grep -q '^pod=' <<< "$body"
+    grep -q '^node=' <<< "$body"
+    printf '%s\n' "$body"
+  args:
+    executable: /bin/bash
+  register: probe_http_check
+  changed_when: false
+  retries: 30
+  delay: 1
+  until: probe_http_check.rc == 0
+

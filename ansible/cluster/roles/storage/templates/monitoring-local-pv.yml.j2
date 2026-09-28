@@ -1,0 +1,40 @@
+{% for node, item in monitoring_storage.items() %}
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ item.storage_class }}
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain
+{% endfor %}
+
+{% for node, item in monitoring_storage.items() %}
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{ item.pv_name }}
+  labels:
+    ticketing.io/storage: monitoring
+    ticketing.io/service: {{ item.service }}
+    ticketing.io/node: "{{ hostvars[node]['ansible_hostname'] }}"
+spec:
+  capacity:
+    storage: {{ item.capacity }}
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: {{ item.storage_class }}
+  local:
+    path: {{ item.mount_path }}
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - "{{ hostvars[node]['ansible_hostname'] }}"
+{% endfor %}

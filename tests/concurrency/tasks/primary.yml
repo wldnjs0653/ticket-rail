@@ -1,0 +1,12 @@
+---
+- name: Query CNPG current primary
+  ansible.builtin.command:
+    argv: ['{{ kubectl_binary }}', '--request-timeout=15s', 'get', 'cluster.postgresql.cnpg.io', '{{ postgres_cluster }}', '-n', '{{ data_namespace }}', '-o', 'jsonpath={.status.currentPrimary}']
+  changed_when: false
+  register: primary_query
+- name: Require a primary identity
+  ansible.builtin.assert:
+    that: primary_query.stdout is match('^[a-z0-9][a-z0-9.-]+$')
+- name: Build psql command using current primary
+  ansible.builtin.set_fact:
+    psql_argv: ['{{ kubectl_binary }}', '--request-timeout=30s', 'exec', '-i', '-n', '{{ data_namespace }}', '{{ primary_query.stdout }}', '-c', '{{ postgres_container }}', '--', 'psql', '-X', '-q', '-t', '-A', '-U', '{{ postgres_user }}', '-d', '{{ postgres_database }}', '-v', 'ON_ERROR_STOP=1', '-P', 'pager=off']

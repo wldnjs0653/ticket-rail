@@ -1,0 +1,49 @@
+---
+- name: Capture final cluster evidence
+  ansible.builtin.command:
+    argv: "{{ item.argv }}"
+  loop:
+    - {name: nodes, argv: ["{{ kubectl_bin }}", get, nodes, -o, wide]}
+    - {name: pods, argv: ["{{ kubectl_bin }}", get, pods, -A, -o, wide]}
+    - {name: deployments, argv: ["{{ kubectl_bin }}", get, deployment, -A]}
+    - {name: statefulsets, argv: ["{{ kubectl_bin }}", get, statefulset, -A]}
+    - {name: pvc, argv: ["{{ kubectl_bin }}", get, pvc, -A, -o, wide]}
+    - {name: cnpg, argv: ["{{ kubectl_bin }}", get, cluster, -n, "{{ data_namespace }}", -o, wide]}
+    - {name: kafka, argv: ["{{ kubectl_bin }}", get, kafka,kafkanodepool,kafkatopic, -n, "{{ data_namespace }}"]}
+    - {name: redis, argv: ["{{ kubectl_bin }}", get, pod, -n, "{{ data_namespace }}", -l, "app.kubernetes.io/name=redis", -o, wide]}
+  register: final_evidence
+  changed_when: false
+  failed_when: false
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Save final evidence files
+  ansible.builtin.copy:
+    dest: "{{ failure_test_run_dir }}/{{ item.item.name }}.txt"
+    mode: "0640"
+    content: |
+      rc={{ item.rc | default('unknown') }}
+      {{ item.stdout | default('') }}
+      {{ item.stderr | default('') }}
+  loop: "{{ final_evidence.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+- name: Save machine-readable scenario results
+  ansible.builtin.copy:
+    dest: "{{ failure_test_run_dir }}/result.json"
+    mode: "0640"
+    content: "{{ failure_results | to_nice_json }}\n"
+
+- name: Render the final Markdown report
+  ansible.builtin.template:
+    src: ../templates/report.md.j2
+    dest: "{{ failure_test_run_dir }}/final-report.md"
+    mode: "0640"
+
+- name: Print the result location
+  ansible.builtin.debug:
+    msg:
+      - "장애 테스트 결과: {{ failure_test_run_dir }}"
+      - "최종 보고서: {{ failure_test_run_dir }}/final-report.md"
+

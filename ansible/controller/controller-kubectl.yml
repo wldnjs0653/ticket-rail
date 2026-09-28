@@ -1,0 +1,148 @@
+---
+- name: Configure kubectl access on the Ansible Controller
+  hosts: localhost
+  connection: local
+  become: true
+  gather_facts: true
+
+  vars:
+    controller_kubeconfig: /root/.kube/config
+    kubectl_binary: /usr/local/bin/kubectl
+    kubeconfig_source_host: master1
+    expected_api_endpoint: https://10.1.93.65:6443
+    kubectl_arch_map:
+      x86_64: amd64
+      aarch64: arm64
+
+  tasks:
+    - name: Require the Master 1 inventory host
+      ansible.builtin.assert:
+        that:
+          - kubeconfig_source_host in hostvars
+        fail_msg: >-
+          The inventory must contain a host named '{{ kubeconfig_source_host }}'.
+
+    - name: Require a supported Controller CPU architecture
+      ansible.builtin.assert:
+        that:
+          - ansible_architecture in kubectl_arch_map
+        fail_msg: "Unsupported Controller architecture: {{ ansible_architecture }}"
+
+    - name: Read the Kubernetes version from Master 1
+      ansible.builtin.command:
+        argv:
+          - kubelet
+          - --version
+      delegate_to: "{{ kubeconfig_source_host }}"
+      register: master_kubelet_version
+      changed_when: false
+
+    - name: Select the matching kubectl version
+      ansible.builtin.set_fact:
+        kubectl_version: >-
+          {{ master_kubelet_version.stdout
+          | regex_search('v[0-9]+\.[0-9]+\.[0-9]+') }}
+
+    - name: Require a valid Kubernetes version
+      ansible.builtin.assert:
+        that:
+          - kubectl_version is match('^v[0-9]+\.[0-9]+\.[0-9]+$')
+        fail_msg: >-
+          Could not determine the Kubernetes version from
+          '{{ master_kubelet_version.stdout }}'.
+
+    - name: Install the matching kubectl binary
+      ansible.builtin.get_url:
+        url: >-
+          https://dl.k8s.io/release/{{ kubectl_version }}/bin/linux/{{ kubectl_arch_map[ansible_architecture] }}/kubectl
+        dest: "{{ kubectl_binary }}"
+        checksum: >-
+          sha256:https://dl.k8s.io/release/{{ kubectl_version }}/bin/linux/{{ kubectl_arch_map[ansible_architecture] }}/kubectl.sha256
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Create the Controller kubeconfig directory
+      ansible.builtin.file:
+        path: /root/.kube
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Read the administrator kubeconfig from Master 1
+      ansible.builtin.slurp:
+        src: /etc/kubernetes/admin.conf
+      delegate_to: "{{ kubeconfig_source_host }}"
+      register: master_admin_kubeconfig
+      no_log: true
+
+    - name: Save the administrator kubeconfig on the Controller
+      ansible.builtin.copy:
+        content: "{{ master_admin_kubeconfig.content | b64decode }}"
+        dest: "{{ controller_kubeconfig }}"
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+
+    - name: Read the configured Kubernetes API endpoint
+      ansible.builtin.command:
+        argv:
+          - "{{ kubectl_binary }}"
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - config
+          - view
+          - --minify
+          - --output
+          - 'jsonpath={.clusters[0].cluster.server}'
+      register: configured_api_endpoint
+      changed_when: false
+
+    - name: Require the Kubernetes API VIP endpoint
+      ansible.builtin.assert:
+        that:
+          - configured_api_endpoint.stdout | trim == expected_api_endpoint
+        fail_msg: >-
+          The copied kubeconfig points to
+          '{{ configured_api_endpoint.stdout | trim }}' instead of
+          '{{ expected_api_endpoint }}'. Check the kubeadm controlPlaneEndpoint
+          and the certificate SAN configuration.
+
+    - name: Verify Kubernetes API readiness from the Controller
+      ansible.builtin.command:
+        argv:
+          - "{{ kubectl_binary }}"
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - get
+          - --raw=/readyz
+      register: kubernetes_api_ready
+      changed_when: false
+
+    - name: Require the Kubernetes API to be ready
+      ansible.builtin.assert:
+        that:
+          - kubernetes_api_ready.stdout | trim == 'ok'
+        fail_msg: >-
+          kubectl was installed, but the Kubernetes API readiness check failed.
+
+    - name: Read the Kubernetes nodes from the Controller
+      ansible.builtin.command:
+        argv:
+          - "{{ kubectl_binary }}"
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - get
+          - nodes
+          - --output
+          - wide
+      register: kubernetes_nodes
+      changed_when: false
+
+    - name: Print the Controller kubectl setup summary
+      ansible.builtin.debug:
+        msg:
+          - "kubectl: {{ kubectl_binary }} ({{ kubectl_version }})"
+          - "kubeconfig: {{ controller_kubeconfig }}"
+          - "Kubernetes API: {{ configured_api_endpoint.stdout | trim }}"
+          - "Kubernetes API readiness: OK"
+          - "{{ kubernetes_nodes.stdout_lines }}"

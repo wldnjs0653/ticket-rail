@@ -1,0 +1,5 @@
+{
+  "description": "최신 booking.user_id는 app_user.id를 참조하는 bigint입니다.",
+  "example_user_ids": [101, 102, 103],
+  "k6_env_example": "USER_IDS=101,102,103"
+}

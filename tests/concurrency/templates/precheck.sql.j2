@@ -1,0 +1,8 @@
+BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;
+SET LOCAL statement_timeout = '8s';
+SELECT json_build_object(
+  'seats', COALESCE((SELECT json_agg(s) FROM
+    (SELECT id, event_id, status FROM public.seat WHERE id={{ seat_id | int }}) s), '[]'::json),
+  'seat_link_count', (SELECT count(*) FROM public.booking_seat WHERE seat_id={{ seat_id | int }})
+);
+COMMIT;

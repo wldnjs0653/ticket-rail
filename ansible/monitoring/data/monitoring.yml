@@ -1,0 +1,617 @@
+---
+- name: Deploy and verify metrics, dashboards, alerts, and logs from start to finish
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/main.yml
+  vars:
+    ansible_python_interpreter: "{{ controller_python }}"
+
+  pre_tasks:
+    - name: Run shared Kubernetes and storage checks
+      ansible.builtin.include_tasks: tasks/cluster_prerequisites.yml
+      vars:
+        required_storage_class_names: "{{ monitoring_storage_class_names }}"
+
+    - name: Read an existing Grafana administrator Secret
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        api_version: v1
+        kind: Secret
+        namespace: "{{ monitoring_namespace }}"
+        name: grafana-admin
+      register: existing_grafana_secret
+      no_log: true
+
+    - name: Generate or reuse the Grafana administrator password
+      ansible.builtin.set_fact:
+        grafana_admin_password: >-
+          {{ (existing_grafana_secret.resources[0].data['admin-password'] | b64decode)
+          if existing_grafana_secret.resources | length == 1
+          else lookup('ansible.builtin.password', playbook_dir
+          + '/.secrets/grafana-admin-password length=32 chars=ascii_letters,digits') }}
+      no_log: true
+
+    - name: Build Metrics Server arguments for this lab cluster
+      ansible.builtin.set_fact:
+        metrics_server_args: >-
+          {{ ['--kubelet-preferred-address-types=InternalIP,Hostname']
+          + (['--kubelet-insecure-tls'] if metrics_server_kubelet_insecure_tls else []) }}
+
+  tasks:
+    - name: Add or refresh official Monitoring Helm repositories
+      ansible.builtin.command:
+        argv:
+          - "{{ helm_binary }}"
+          - repo
+          - add
+          - "{{ item.name }}"
+          - "{{ item.url }}"
+          - --force-update
+      loop:
+        - name: metrics-server
+          url: https://kubernetes-sigs.github.io/metrics-server/
+        - name: prometheus-community
+          url: https://prometheus-community.github.io/helm-charts
+        - name: grafana-community
+          url: https://grafana-community.github.io/helm-charts
+        - name: grafana
+          url: https://grafana.github.io/helm-charts
+      register: monitoring_repos
+      changed_when: >-
+        'has been added' in monitoring_repos.stdout or
+        'has been updated' in monitoring_repos.stdout
+
+    - name: Install Metrics Server for kubectl top and HPA
+      kubernetes.core.helm:
+        binary_path: "{{ helm_binary }}"
+        kubeconfig: "{{ controller_kubeconfig }}"
+        release_name: metrics-server
+        chart_ref: metrics-server/metrics-server
+        chart_version: "{{ metrics_server_chart_version }}"
+        release_namespace: kube-system
+        create_namespace: false
+        release_state: present
+        update_repo_cache: true
+        reset_values: true
+        atomic: true
+        wait: true
+        timeout: 10m0s
+        history_max: 5
+        release_values:
+          replicas: 1
+          args: "{{ metrics_server_args }}"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 200Mi
+            limits:
+              cpu: 300m
+              memory: 400Mi
+
+    - name: Create the Grafana administrator Secret
+      kubernetes.core.k8s:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        state: present
+        apply: true
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: grafana-admin
+            namespace: "{{ monitoring_namespace }}"
+            labels:
+              app.kubernetes.io/name: grafana
+              app.kubernetes.io/part-of: ticketing-platform
+          type: Opaque
+          stringData:
+            admin-user: admin
+            admin-password: "{{ grafana_admin_password }}"
+      no_log: true
+
+    - name: Install Prometheus, Grafana, Alertmanager, and exporters
+      kubernetes.core.helm:
+        binary_path: "{{ helm_binary }}"
+        kubeconfig: "{{ controller_kubeconfig }}"
+        release_name: prometheus-stack
+        chart_ref: prometheus-community/kube-prometheus-stack
+        chart_version: "{{ kube_prometheus_stack_chart_version }}"
+        release_namespace: "{{ monitoring_namespace }}"
+        create_namespace: false
+        release_state: present
+        update_repo_cache: true
+        reset_values: true
+        atomic: true
+        wait: true
+        timeout: 20m0s
+        history_max: 5
+        release_values:
+          prometheus-node-exporter:
+            nodeSelector:
+              kubernetes.io/os: linux
+              ticketing.io/workload: app 
+
+          kubeEtcd:
+            enabled: false
+          kubeControllerManager:
+            enabled: false
+          kubeScheduler:
+            enabled: false
+          kubeProxy:
+            enabled: false
+          prometheusOperator:
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
+          prometheus:
+            prometheusSpec:
+              retention: "{{ prometheus_retention }}"
+              scrapeInterval: 30s
+              evaluationInterval: 30s
+              serviceMonitorSelectorNilUsesHelmValues: false
+              serviceMonitorSelector: {}
+              serviceMonitorNamespaceSelector: {}
+              podMonitorSelectorNilUsesHelmValues: false
+              podMonitorSelector: {}
+              podMonitorNamespaceSelector: {}
+              ruleSelectorNilUsesHelmValues: false
+              ruleSelector: {}
+              ruleNamespaceSelector: {}
+              persistentVolumeClaimRetentionPolicy:
+                whenDeleted: Retain
+                whenScaled: Retain
+              storageSpec:
+                volumeClaimTemplate:
+                  spec:
+                    storageClassName: "{{ prometheus_storage_class_name }}"
+                    accessModes:
+                      - ReadWriteOnce
+                    resources:
+                      requests:
+                        storage: "{{ prometheus_storage_size }}"
+              resources:
+                requests:
+                  cpu: 300m
+                  memory: 1Gi
+                limits:
+                  cpu: '1'
+                  memory: 2Gi
+          alertmanager:
+            alertmanagerSpec:
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  cpu: 200m
+                  memory: 256Mi
+          grafana:
+            admin:
+              existingSecret: grafana-admin
+              userKey: admin-user
+              passwordKey: admin-password
+            persistence:
+              enabled: true
+              type: pvc
+              storageClassName: "{{ grafana_storage_class_name }}"
+              accessModes:
+                - ReadWriteOnce
+              size: "{{ grafana_storage_size }}"
+              annotations:
+                helm.sh/resource-policy: keep
+            ingress:
+              enabled: "{{ grafana_ingress_enabled }}"
+              ingressClassName: "{{ grafana_ingress_class }}"
+              hosts:
+                - "{{ grafana_host }}"
+              path: /
+              pathType: Prefix
+            additionalDataSources:
+              - name: Loki
+                uid: loki
+                type: loki
+                access: proxy
+                url: http://loki-gateway.{{ monitoring_namespace }}.svc.cluster.local
+                isDefault: false
+                jsonData:
+                  maxLines: 1000
+            resources:
+              requests:
+                cpu: 100m
+                memory: 512Mi
+              limits:
+                cpu: 500m
+                memory: 1Gi
+
+    - name: Install Loki in monolithic filesystem mode
+      kubernetes.core.helm:
+        binary_path: "{{ helm_binary }}"
+        kubeconfig: "{{ controller_kubeconfig }}"
+        release_name: loki
+        chart_ref: grafana-community/loki
+        chart_version: "{{ loki_chart_version }}"
+        release_namespace: "{{ monitoring_namespace }}"
+        create_namespace: false
+        release_state: present
+        update_repo_cache: true
+        reset_values: true
+        atomic: true
+        wait: true
+        timeout: 20m0s
+        history_max: 5
+        release_values:
+          deploymentMode: Monolithic
+          loki:
+            auth_enabled: false
+            commonConfig:
+              path_prefix: /var/loki
+              replication_factor: 1
+            storage:
+              type: filesystem
+              filesystem:
+                chunks_directory: /var/loki/chunks
+                rules_directory: /var/loki/rules
+            schemaConfig:
+              configs:
+                - from: '2024-01-01'
+                  store: tsdb
+                  object_store: filesystem
+                  schema: v13
+                  index:
+                    prefix: index_
+                    period: 24h
+            limits_config:
+              retention_period: "{{ loki_retention }}"
+              reject_old_samples: true
+              reject_old_samples_max_age: 168h
+              volume_enabled: true
+            compactor:
+              working_directory: /var/loki/compactor
+              retention_enabled: true
+              delete_request_store: filesystem
+          singleBinary:
+            replicas: 1
+            affinity: {}
+            resources:
+              requests:
+                cpu: 200m
+                memory: 512Mi
+              limits:
+                cpu: 500m
+                memory: 1Gi
+            persistence:
+              enabled: true
+              storageClass: "{{ loki_storage_class_name }}"
+              size: "{{ loki_storage_size }}"
+              whenDeleted: Retain
+              whenScaled: Retain
+              enableStatefulSetAutoDeletePVC: false
+          read:
+            replicas: 0
+          write:
+            replicas: 0
+          backend:
+            replicas: 0
+          chunksCache:
+            enabled: false
+          resultsCache:
+            enabled: false
+          gateway:
+            enabled: true
+            replicas: 1
+            resources:
+              requests:
+                cpu: 25m
+                memory: 32Mi
+              limits:
+                cpu: 100m
+                memory: 128Mi
+
+    - name: Install Grafana Alloy as a Worker DaemonSet
+      kubernetes.core.helm:
+        binary_path: "{{ helm_binary }}"
+        kubeconfig: "{{ controller_kubeconfig }}"
+        release_name: alloy
+        chart_ref: grafana/alloy
+        chart_version: "{{ alloy_chart_version }}"
+        release_namespace: "{{ monitoring_namespace }}"
+        create_namespace: false
+        release_state: present
+        update_repo_cache: true
+        reset_values: true
+        atomic: true
+        wait: true
+        timeout: 15m0s
+        history_max: 5
+        release_values:
+          alloy:
+            clustering:
+              enabled: true
+              name: ticketing-alloy
+            enableReporting: false
+            resources:
+              requests:
+                cpu: 50m
+                memory: 128Mi
+              limits:
+                cpu: 250m
+                memory: 256Mi
+            configMap:
+              create: true
+              content: |
+                logging {
+                  level  = "info"
+                  format = "logfmt"
+                }
+
+                discovery.kubernetes "pods" {
+                  role = "pod"
+                  selectors {
+                    role  = "pod"
+                    field = "spec.nodeName=" + coalesce(sys.env("HOSTNAME"), constants.hostname)
+                  }
+                }
+
+                discovery.relabel "pod_logs" {
+                  targets = discovery.kubernetes.pods.targets
+
+                  rule {
+                    source_labels = ["__meta_kubernetes_namespace"]
+                    target_label  = "namespace"
+                  }
+                  rule {
+                    source_labels = ["__meta_kubernetes_pod_name"]
+                    target_label  = "pod"
+                  }
+                  rule {
+                    source_labels = ["__meta_kubernetes_pod_container_name"]
+                    target_label  = "container"
+                  }
+                  rule {
+                    source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+                    target_label  = "app"
+                  }
+                }
+
+                loki.source.kubernetes "pod_logs" {
+                  targets    = discovery.relabel.pod_logs.output
+                  forward_to = [loki.process.pod_logs.receiver]
+                }
+
+                loki.process "pod_logs" {
+                  stage.static_labels {
+                    values = {
+                      cluster = "{{ cluster_name }}",
+                      source  = "pod",
+                    }
+                  }
+                  forward_to = [loki.write.local.receiver]
+                }
+
+                loki.source.kubernetes_events "cluster_events" {
+                  job_name   = "integrations/kubernetes/eventhandler"
+                  log_format = "logfmt"
+                  clustering {
+                    enabled = true
+                  }
+                  forward_to = [loki.process.cluster_events.receiver]
+                }
+
+                loki.process "cluster_events" {
+                  stage.static_labels {
+                    values = {
+                      cluster = "{{ cluster_name }}",
+                      source  = "kubernetes-event",
+                    }
+                  }
+                  forward_to = [loki.write.local.receiver]
+                }
+
+                loki.write "local" {
+                  endpoint {
+                    url = "http://loki-gateway.{{ monitoring_namespace }}.svc.cluster.local/loki/api/v1/push"
+                  }
+                }
+          controller:
+            type: daemonset
+            minReadySeconds: 5
+            nodeSelector: {}
+            tolerations:
+              - key: dedicated
+                operator: Equal
+                value: data
+                effect: NoSchedule
+            affinity:
+              nodeAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                  nodeSelectorTerms:
+                    - matchExpressions:
+                        - key: ticketing.io/workload
+                          operator: In
+                          values:
+                            - app
+                            - data
+          rbac:
+            create: true
+
+    - name: Read the current Alloy node selector
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig
+          - "{{ controller_kubeconfig }}"
+          - get
+          - daemonset
+          - alloy
+          - -n
+          - "{{ monitoring_namespace }}"
+          - -o
+          - "jsonpath={.spec.template.spec.nodeSelector}"
+      register: alloy_current_node_selector
+      changed_when: false
+
+    - name: Remove the legacy app-only node selector from Alloy
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig
+          - "{{ controller_kubeconfig }}"
+          - patch
+          - daemonset
+          - alloy
+          - -n
+          - "{{ monitoring_namespace }}"
+          - --type=merge
+          - -p
+          - '{"spec":{"template":{"spec":{"nodeSelector":null}}}}'
+      when: "'ticketing.io/workload' in alloy_current_node_selector.stdout"
+      changed_when: true
+
+    - name: Wait for Alloy on every Worker
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig
+          - "{{ controller_kubeconfig }}"
+          - rollout
+          - status
+          - daemonset/alloy
+          - -n
+          - "{{ monitoring_namespace }}"
+          - --timeout=5m
+      changed_when: false
+
+    - name: Create Redis and Kafka PodMonitors
+      kubernetes.core.k8s:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        state: present
+        apply: true
+        definition: "{{ item }}"
+      loop:
+        - apiVersion: monitoring.coreos.com/v1
+          kind: PodMonitor
+          metadata:
+            name: ticketing-redis
+            namespace: "{{ monitoring_namespace }}"
+            labels:
+              app.kubernetes.io/part-of: ticketing-platform
+          spec:
+            namespaceSelector:
+              matchNames:
+                - "{{ data_namespace }}"
+            selector:
+              matchLabels:
+                app.kubernetes.io/name: redis
+            podMetricsEndpoints:
+              - port: metrics
+                path: /metrics
+                interval: 30s
+        - apiVersion: monitoring.coreos.com/v1
+          kind: PodMonitor
+          metadata:
+            name: ticketing-kafka
+            namespace: "{{ monitoring_namespace }}"
+            labels:
+              app.kubernetes.io/part-of: ticketing-platform
+          spec:
+            namespaceSelector:
+              matchNames:
+                - "{{ data_namespace }}"
+            selector:
+              matchExpressions:
+                - key: strimzi.io/kind
+                  operator: In
+                  values:
+                    - Kafka
+            podMetricsEndpoints:
+              - port: tcp-prometheus
+                path: /metrics
+                interval: 30s
+
+    - name: Check whether the PostgreSQL Cluster exists
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ controller_kubeconfig }}"
+        api_version: postgresql.cnpg.io/v1
+        kind: Cluster
+        namespace: "{{ data_namespace }}"
+        name: "{{ postgresql_cluster_name }}"
+      register: postgresql_for_monitoring
+      failed_when: false
+
+    - name: Enable the CloudNativePG PodMonitor after Prometheus CRDs exist
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - --namespace
+          - "{{ data_namespace }}"
+          - patch
+          - clusters.postgresql.cnpg.io
+          - "{{ postgresql_cluster_name }}"
+          - --type=merge
+          - >-
+            --patch={"spec":{"monitoring":{"enablePodMonitor":true}}}
+      register: cnpg_monitoring_patch
+      changed_when: "'no change' not in cnpg_monitoring_patch.stdout"
+      when: postgresql_for_monitoring.resources | default([]) | length == 1
+
+    - name: Wait for the Resource Metrics API to return nodes
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - get
+          - --raw=/apis/metrics.k8s.io/v1beta1/nodes
+      register: metrics_api
+      until: ((metrics_api.stdout | from_json)['items'] | length) > 0
+      retries: 30
+      delay: 10
+      changed_when: false
+
+    - name: Verify Grafana health through the Kubernetes Service proxy
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - get
+          - >-
+            --raw=/api/v1/namespaces/{{ monitoring_namespace }}/services/http:prometheus-stack-grafana:80/proxy/api/health
+      register: grafana_health
+      changed_when: false
+
+    - name: Verify Loki readiness through the Kubernetes Service proxy
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ controller_kubeconfig }}"
+          - get
+          - >-
+            --raw=/api/v1/namespaces/{{ monitoring_namespace }}/services/http:loki:3100/proxy/ready
+      register: loki_ready
+      changed_when: false
+
+    - name: Require monitoring and logging validation to pass
+      ansible.builtin.assert:
+        that:
+          - "((metrics_api.stdout | from_json)['items'] | length) > 0"
+          - "(grafana_health.stdout | from_json).database == 'ok'"
+          - loki_ready.stdout | trim == 'ready'
+        success_msg: >-
+          Monitoring is complete: Metrics Server, Prometheus, Grafana, Alertmanager,
+          Loki, and Alloy are operational; Pod logs and Kubernetes Events flow to Loki.
+
+    - name: Print monitoring access information
+      ansible.builtin.debug:
+        msg:
+          - "Grafana URL: http://{{ grafana_host }} (map the host to MetalLB VIP if DNS is absent)"
+          - "Grafana user: admin"
+          - >-
+            Grafana password: kubectl -n {{ monitoring_namespace }} get secret grafana-admin
+            -o jsonpath='{.data.admin-password}' | base64 -d
+          - "Metrics Server uses --kubelet-insecure-tls={{ metrics_server_kubelet_insecure_tls }} for this isolated lab."
+          - "Prometheus/Grafana/Loki remain ClusterIP except the Grafana Ingress."

@@ -1,0 +1,51 @@
+---
+storage_disk_size_gib: 80
+storage_disk_size_tolerance_gib: 1
+storage_partition_size_tolerance_mib: 4
+storage_partition_start_mib: 1
+
+storage_mount_root: /mnt/local-pv
+
+storage_partitions:
+  - number: 1
+    name: redis
+    mount_path: /mnt/local-pv/redis
+    filesystem_label: K8S_REDIS
+    capacity: 5Gi
+
+  - number: 2
+    name: postgresql
+    mount_path: /mnt/local-pv/postgresql
+    filesystem_label: K8S_POSTGRES
+    capacity: 20Gi
+
+  - number: 3
+    name: kafka
+    mount_path: /mnt/local-pv/kafka
+    filesystem_label: K8S_KAFKA
+    capacity: 30Gi
+
+monitoring_storage:
+  worker1:
+    service: prometheus
+    capacity: 20Gi
+    filesystem_label: K8S_PROM
+    mount_path: /mnt/local-pv/prometheus
+    storage_class: ticketing-local-prometheus
+    pv_name: local-pv-prometheus-w1
+
+  worker2:
+    service: grafana
+    capacity: 2Gi
+    filesystem_label: K8S_GRAFANA
+    mount_path: /mnt/local-pv/grafana
+    storage_class: ticketing-local-grafana
+    pv_name: local-pv-grafana-w2
+
+  worker3:
+    service: loki
+    capacity: 20Gi
+    filesystem_label: K8S_LOKI
+    mount_path: /mnt/local-pv/loki
+    storage_class: ticketing-local-loki
+    pv_name: local-pv-loki-w3

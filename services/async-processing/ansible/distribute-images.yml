@@ -1,0 +1,81 @@
+---
+- name: Validate the Worker inventory before image distribution
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    - name: Require at least three Workers
+      ansible.builtin.assert:
+        that:
+          - (groups['workers'] | default([]) | length) >= 3
+        fail_msg: "The parent inventory must contain at least three hosts in [workers]."
+
+- name: Import all ticketing images into every Worker containerd
+  hosts: workers
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - vars/main.yml
+
+  tasks:
+    - name: Check the containerd client
+      ansible.builtin.command:
+        cmd: ctr version
+      changed_when: false
+
+    - name: Create the Worker image archive directory
+      ansible.builtin.file:
+        path: "{{ worker_image_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Copy all OCI image archives to the Worker
+      ansible.builtin.copy:
+        src: "{{ item.archive }}"
+        dest: "{{ worker_image_dir }}/{{ item.name }}.tar"
+        owner: root
+        group: root
+        mode: "0644"
+      loop: "{{ ticketing_images }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Import all images into the Kubernetes containerd namespace
+      ansible.builtin.command:
+        argv:
+          - ctr
+          - --namespace
+          - k8s.io
+          - images
+          - import
+          - "{{ worker_image_dir }}/{{ item.name }}.tar"
+      loop: "{{ ticketing_images }}"
+      loop_control:
+        label: "{{ item.image }}"
+      changed_when: true
+
+    - name: Read images available to Kubernetes
+      ansible.builtin.command:
+        argv:
+          - ctr
+          - --namespace
+          - k8s.io
+          - images
+          - list
+          - --quiet
+      register: worker_images
+      changed_when: false
+
+    - name: Require every image on every Worker
+      ansible.builtin.assert:
+        that:
+          - item.image in worker_images.stdout_lines
+        fail_msg: "{{ item.image }} is missing from {{ inventory_hostname }}."
+      loop: "{{ ticketing_images }}"
+      loop_control:
+        label: "{{ item.image }}"
+

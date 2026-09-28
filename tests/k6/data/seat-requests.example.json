@@ -1,0 +1,12 @@
+{
+  "description": "동일 좌석 시험 입력 예시. USER_IDS는 app_user에 실제 존재해야 합니다.",
+  "required_environment": {
+    "EVENT_ID": "ticket_event.id",
+    "SEAT_ID": "status가 AVAILABLE인 seat.id",
+    "USER_IDS": "쉼표로 구분한 app_user.id 목록"
+  },
+  "generated_by_script": {
+    "queue_token": "POST /queue/join 응답에서 자동 수집",
+    "idempotency_key": "Queue, Hold, Booking 요청별로 자동 생성"
+  }
+}

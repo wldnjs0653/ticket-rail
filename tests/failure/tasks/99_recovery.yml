@@ -1,0 +1,183 @@
+---
+- name: Start containerd on the Worker test target
+  ansible.builtin.systemd_service:
+    name: containerd
+    state: started
+    enabled: true
+  delegate_to: "{{ worker_failure_target }}"
+  become: true
+  failed_when: false
+
+- name: Start kubelet on the Worker test target
+  ansible.builtin.systemd_service:
+    name: kubelet
+    state: started
+    enabled: true
+  delegate_to: "{{ worker_failure_target }}"
+  become: true
+  failed_when: false
+
+- name: Start containerd on the Master test target
+  ansible.builtin.systemd_service:
+    name: containerd
+    state: started
+    enabled: true
+  delegate_to: "{{ master_failure_target }}"
+  become: true
+  failed_when: false
+
+- name: Start kubelet on the Master test target
+  ansible.builtin.systemd_service:
+    name: kubelet
+    state: started
+    enabled: true
+  delegate_to: "{{ master_failure_target }}"
+  become: true
+  failed_when: false
+
+- name: Start HAProxy on both API Load Balancers
+  ansible.builtin.systemd_service:
+    name: haproxy
+    state: started
+    enabled: true
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['load_balancers'] }}"
+  become: true
+  failed_when: false
+
+- name: Start Keepalived on both API Load Balancers
+  ansible.builtin.systemd_service:
+    name: keepalived
+    state: started
+    enabled: true
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['load_balancers'] }}"
+  become: true
+  failed_when: false
+
+- name: Uncordon the Worker test target if necessary
+  ansible.builtin.command:
+    argv:
+      - "{{ kubectl_bin }}"
+      - uncordon
+      - "{{ worker_failure_target }}"
+  register: recovery_uncordon
+  changed_when: "'uncordoned' in recovery_uncordon.stdout"
+  failed_when: false
+
+- name: Wait for the Worker and Master test targets
+  ansible.builtin.command:
+    argv:
+      - "{{ kubectl_bin }}"
+      - wait
+      - --for=condition=Ready
+      - "node/{{ item }}"
+      - --timeout=240s
+  loop:
+    - "{{ worker_failure_target }}"
+    - "{{ master_failure_target }}"
+  changed_when: false
+  failed_when: false
+
+- name: Remove the isolated traffic probe during recovery
+  ansible.builtin.command:
+    argv:
+      - "{{ kubectl_bin }}"
+      - delete
+      - namespace
+      - "{{ traffic_test_namespace }}"
+      - --ignore-not-found=true
+      - --wait=false
+  register: recovery_probe_cleanup
+  changed_when: "'deleted' in recovery_probe_cleanup.stdout"
+  failed_when: false
+
+
+- name: Remove a leftover Redis marker when possible
+  ansible.builtin.shell: |
+    set -euo pipefail
+    sentinel=$("{{ kubectl_bin }}" get pod -n "{{ data_namespace }}"       -l app.kubernetes.io/name=redis       --field-selector=status.phase=Running       -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+    [[ -n "$sentinel" ]] || exit 0
+    addr=$("{{ kubectl_bin }}" exec -n "{{ data_namespace }}" "$sentinel" -c sentinel --       sh -lc 'export REDISCLI_AUTH="$REDIS_PASSWORD"; redis-cli -p 26379 --raw SENTINEL get-master-addr-by-name "{{ redis_master_name }}" | sed -n "1p"' 2>/dev/null || true)
+    master=""
+    case "$addr" in
+      redis-*) master="${addr%%.*}" ;;
+      "")
+        exit 0
+        ;;
+      *)
+        master=$("{{ kubectl_bin }}" get pod -n "{{ data_namespace }}"           -l app.kubernetes.io/name=redis           -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.status.podIP}{"\n"}{end}'           | awk -F'|' -v addr="$addr" '$2 == addr {print $1; exit}')
+        ;;
+    esac
+    [[ -n "$master" ]] || exit 0
+    "{{ kubectl_bin }}" exec -n "{{ data_namespace }}" "$master" -c redis --       sh -lc 'export REDISCLI_AUTH="$REDIS_PASSWORD"; redis-cli DEL "failure-test:{{ cleanup_test_id | default(failure_test_run_id) }}"' || true
+  args:
+    executable: /bin/bash
+  changed_when: false
+  failed_when: false
+
+- name: Remove a leftover PostgreSQL failure-test Schema when possible
+  ansible.builtin.shell: |
+    set -euo pipefail
+    primary=$("{{ kubectl_bin }}" get pod -n "{{ data_namespace }}"       -l "cnpg.io/cluster={{ postgresql_cluster }},cnpg.io/instanceRole=primary"       -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+    [[ -n "$primary" ]] || exit 0
+    "{{ kubectl_bin }}" exec -n "{{ data_namespace }}" "$primary" -c postgres --       psql -U postgres -d ticketing -v ON_ERROR_STOP=1       -c 'DROP SCHEMA IF EXISTS failure_test CASCADE;' || true
+  args:
+    executable: /bin/bash
+  changed_when: false
+  failed_when: false
+
+- name: Remove a leftover Kafka test Topic when possible
+  ansible.builtin.shell: |
+    set -euo pipefail
+    topic="{{ kafka_test_topic | default('failure-test-' ~ (cleanup_test_id | default('') | lower | regex_replace('[^a-z0-9-]', '-'))) }}"
+    [[ "$topic" != "failure-test-" ]] || exit 0
+    broker=$("{{ kubectl_bin }}" get pod -n "{{ data_namespace }}"       -l "strimzi.io/name={{ kafka_cluster }}-kafka"       --field-selector=status.phase=Running       -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+    [[ -n "$broker" ]] || exit 0
+    "{{ kubectl_bin }}" exec -n "{{ data_namespace }}" "$broker" --       /opt/kafka/bin/kafka-topics.sh       --bootstrap-server "{{ kafka_cluster }}-kafka-bootstrap:9092"       --delete --if-exists --topic "$topic" || true
+  args:
+    executable: /bin/bash
+  when: kafka_test_topic is defined or cleanup_test_id is defined
+  changed_when: false
+  failed_when: false
+
+- name: Require all Kubernetes nodes to be Ready after recovery
+  ansible.builtin.shell: |
+    set -euo pipefail
+    for node in {{ groups['cluster_nodes'] | join(' ') }}; do
+      status=$("{{ kubectl_bin }}" get node "$node" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+      [[ "$status" == "True" ]] || { echo "$node Ready=$status" >&2; exit 1; }
+    done
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Require the Kubernetes API after recovery
+  ansible.builtin.command:
+    argv:
+      - "{{ kubectl_bin }}"
+      - --request-timeout=2s
+      - get
+      - --raw=/readyz
+  register: recovery_api_ready
+  changed_when: false
+  failed_when: recovery_api_ready.rc != 0 or 'ok' not in recovery_api_ready.stdout
+
+- name: Read API VIP ownership after recovery
+  ansible.builtin.command:
+    argv: [ip, -4, addr, show]
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['load_balancers'] }}"
+  register: recovery_vip_checks
+  changed_when: false
+
+- name: Require exactly one API VIP owner after recovery
+  ansible.builtin.assert:
+    that:
+      - >-
+        recovery_vip_checks.results
+        | selectattr('stdout', 'search', kubernetes_api_vip)
+        | list
+        | length == 1
+    fail_msg: 복구 후 API VIP 소유자가 정확히 한 대가 아닙니다.
+

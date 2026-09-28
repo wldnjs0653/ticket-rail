@@ -1,0 +1,24 @@
+---
+- name: Validate storage device
+  ansible.builtin.import_tasks: preflight.yml
+  when: storage_mode | default('worker') == "worker"
+
+- name: Create storage partitions
+  ansible.builtin.import_tasks: partition.yml
+  when: storage_mode | default('worker') == "worker"
+
+- name: Create filesystems
+  ansible.builtin.import_tasks: filesystem.yml
+  when: storage_mode | default('worker') == "worker"
+
+- name: Mount storage partitions
+  ansible.builtin.import_tasks: mount.yml
+  when: storage_mode | default('worker') == "worker"
+
+- name: Verify storage configuration
+  ansible.builtin.import_tasks: verify.yml
+  when: storage_mode | default('worker') == "worker"
+
+- name: Configure Kubernetes Local PV
+  ansible.builtin.import_tasks: k8s-pv.yml
+  when: storage_mode | default('worker') == "kubernetes"
