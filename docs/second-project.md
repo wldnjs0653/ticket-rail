@@ -20,6 +20,23 @@ AWS 네트워크와 Terraform·ROSA 인프라 구축, 환경 간 연결 및 DR �
 
 ## 구성과 처리 흐름
 
+```mermaid
+flowchart LR
+    U[사용자 요청] --> API[대기열 · 좌석 선점 · 예약 API]
+    API --> DATA[(Redis · PostgreSQL)]
+    API --> KAFKA[Kafka]
+    KAFKA --> PAY[결제 Consumer]
+    PAY --> NOTI[알림 Consumer]
+    NOTI --> RESULT[처리 결과 저장]
+```
+
+| 환경 | 애플리케이션·데이터 | 결제·알림 처리 |
+| --- | --- | --- |
+| 온프레미스 | Kubernetes와 온프레미스 데이터 계층 | 온프레미스 Consumer |
+| 하이브리드 | 온프레미스 애플리케이션·데이터 계층 | 온프레미스와 ROSA Consumer가 분담 |
+| Full AWS | ROSA와 AWS 관리형 데이터·메시징 서비스 | ROSA Consumer |
+
+
 - **온프레미스:** Kubernetes에서 애플리케이션, Redis, PostgreSQL, Kafka와 Consumer 운영
 - **하이브리드:** 온프레미스 데이터 계층과 AWS ROSA에 추가된 결제·알림 Consumer를 사설 경로로 연결
 - **Full AWS:** ROSA와 AWS 관리형 데이터·메시징 서비스를 이용해 전체 서비스 흐름 구성
@@ -32,10 +49,18 @@ AWS 네트워크와 Terraform·ROSA 인프라 구축, 환경 간 연결 및 DR �
 | 환경 | 시험 및 결과 |
 | --- | --- |
 | 온프레미스 | Consumer 증설과 Pod 내부 동시성 조정 후 초당 31건의 예매 흐름 처리 확인 |
-| 하이브리드 | 초당 60건, 180초 시험에서 예약·모의 결제·알림 각 10,800건 처리 확인 |
+| 하이브리드 | 초당 60건을 180초간 유입하고, 종료 후 관측에서 예약·모의 결제·알림 각 10,800건 처리 완료 확인 |
 | Full AWS | 초당 80건, 600초 시험에서 예약·모의 결제·알림 각 48,000건 처리 확인 |
 
-Full AWS 시험에서 HTTP 실패, Dropped Iteration, Flow Failure는 각각 0건이었고 종료 시 양쪽 Consumer Group Lag는 0이었습니다. 각 결과는 해당 환경과 시험 조건에서 관측한 값입니다.
+Full AWS 시험에서 HTTP 실패, Dropped Iteration, Flow Failure는 각각 0건이었고 종료 시 양쪽 Consumer Group Lag는 0이었습니다.
+
+## 처리 병목 분석과 개선
+
+부하를 높이며 API 응답과 예약·결제·알림 완료 건수, Kafka Consumer Group Lag를 함께 확인했습니다. 결제 처리 속도가 요청 유입을 따라가지 못해 Lag가 누적되는 구간을 확인하고 Consumer의 처리 용량을 우선 개선했습니다.
+
+1. **온프레미스:** Payment Consumer Pod를 3개에서 6개로 늘리고 Pod별 동시 처리 수를 1개에서 4개로 조정했습니다. 단계별 시험에서 초당 8건, 17건, 31건의 처리 결과를 확인했습니다.
+2. **하이브리드:** ROSA에 결제·알림 Consumer를 추가하고 Kafka 파티션과 동시성, 데이터베이스 연결을 조정했습니다. k6 부하와 Lag를 관측하고 최종 업무 완료 건수를 확인했습니다.
+3. **Full AWS:** 결제·알림의 병렬 처리와 KEDA 축소 안정화 정책을 조정했습니다. 초당 80건의 600초 시험에서 업무 완료 건수와 잔여 Lag를 확인했습니다.
 
 ## 장애 대응 개선
 
@@ -43,8 +68,12 @@ Full AWS 시험에서 HTTP 실패, Dropped Iteration, Flow Failure는 각각 0�
 - **PostgreSQL:** CloudNativePG의 종료 대기 설정을 조정해 비교 시험에서 Primary 전환 시간을 183.42초에서 32.98초로 줄였습니다. 장애 전 데이터 마커 보존과 API 정상화도 확인했습니다.
 - **재해 복구:** 팀은 온프레미스 애플리케이션 장애를 재현하고 CloudWatch와 Route 53을 이용한 AWS 전환과 복귀를 검증했습니다.
 
-위 결과는 각 시험에서 측정한 값입니다. DR 시험의 복귀 시 AWS 신규 데이터는 시험용으로 폐기했으며, 역방향 동기화와 미처리 이벤트 승계는 구현 완료 범위에 포함하지 않았습니다.
+DR 검증은 온프레미스 애플리케이션 중단에 따른 AWS 전환과 온프레미스 복귀를 대상으로 수행했습니다.
 
 ## 사용 기술
 
 Linux · Kubernetes · ROSA · AWS · Kafka · Redis · PostgreSQL · KEDA · Terraform · Ansible · GitHub Actions · Prometheus · Grafana · k6
+
+## 저장소 안내
+
+이 저장소의 기존 코드와 실행 안내는 1차 프로젝트를 중심으로 구성되어 있습니다. 이 문서는 2차 프로젝트의 설계, 담당 업무와 검증 결과를 소개합니다.
