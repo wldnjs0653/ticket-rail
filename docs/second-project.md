@@ -1,4 +1,4 @@
-# TicketRail 2차 프로젝트
+# TicketRail ② 하이브리드 클라우드 확장 및 성능 검증
 
 ## Kubernetes 기반 티켓 예매 서비스의 하이브리드 클라우드 확장과 성능 검증
 
@@ -74,6 +74,18 @@ DR 검증은 온프레미스 애플리케이션 중단에 따른 AWS 전환과 �
 
 Linux · Kubernetes · ROSA · AWS · Kafka · Redis · PostgreSQL · KEDA · Terraform · Ansible · GitHub Actions · Prometheus · Grafana · k6
 
-## 저장소 안내
+## 구현 소스 안내
 
-이 저장소의 기존 코드와 실행 안내는 1차 프로젝트를 중심으로 구성되어 있습니다. 이 문서는 2차 프로젝트의 설계, 담당 업무와 검증 결과를 소개합니다.
+2차 프로젝트의 구현은 [공동 저장소](https://github.com/jisoo9123/ticketing-project)에서 확인할 수 있습니다. 2026년 10월 28일 공개 브랜치를 확인한 결과, 최신 애플리케이션 변경은 `fix/payment-delay-confirmation-ui`에 있으며 `main`보다 6개 커밋 앞서 있습니다.
+
+| 자료 | 확인 위치 |
+| --- | --- |
+| 성능 튜닝이 통합된 기준 | [main](https://github.com/jisoo9123/ticketing-project/tree/main) |
+| 날짜 선택·결제 상태 화면까지 반영한 변경 | [fix/payment-delay-confirmation-ui](https://github.com/jisoo9123/ticketing-project/tree/fix/payment-delay-confirmation-ui) |
+| Consumer 처리 코드 | [src/consumers](https://github.com/jisoo9123/ticketing-project/tree/fix/payment-delay-confirmation-ui/src/consumers) |
+| ROSA 배포·하이브리드 KEDA 구성 | [k8s_playbooks/rosa](https://github.com/jisoo9123/ticketing-project/tree/fix/payment-delay-confirmation-ui/k8s_playbooks/rosa) |
+| 온프레미스 KEDA 구성 | [consumer-keda.yaml](https://github.com/jisoo9123/ticketing-project/blob/fix/payment-delay-confirmation-ui/k8s_playbooks/app/consumer-keda.yaml) |
+
+공동 저장소에서 Redis·PostgreSQL 복구 개선과 Consumer 병렬 처리 이력을 확인했습니다. Terraform 파일과 Full AWS 최종 성능 시험에 사용한 전체 설정·결과 원본은 확인한 브랜치에서 찾지 못해, 해당 구현 자료의 공개 범위와 보고서의 시험 성과를 구분합니다.
+
+[TicketRail 전체 소개](../README.md) · [1차 프로젝트 상세](first-project.md)
