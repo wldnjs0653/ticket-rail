@@ -41,26 +41,14 @@ AWS 네트워크·Terraform·ROSA 인프라와 DR 구성은 팀원이 담당했�
 | **하이브리드** | 온프레미스 API·데이터 유지 | 온프레미스 + ROSA Consumer 분담, Tailscale 연결 |
 | **Full AWS** | ROSA API · Valkey · RDS · MSK | ROSA Consumer |
 
-환경별 도표와 처리 순서는 아래에서 펼쳐 볼 수 있습니다.
+발표 PPT의 환경별 구성도와 처리 순서는 아래에서 펼쳐 볼 수 있습니다. 이미지는 원본 크기로 확대할 수 있습니다.
 
 <details>
 <summary><strong>① 온프레미스 구성·처리 흐름 — Kubernetes에서 전체 예매 처리</strong></summary>
 
-```mermaid
-flowchart TB
-    U["사용자"] --> ENTRY["MetalLB 서비스 VIP → NGINX Ingress"]
-    subgraph ONPREM["온프레미스 Kubernetes"]
-        ENTRY --> API["Backend API"]
-        API --> REDIS[("Redis Sentinel: 대기열·좌석 임시 선점")]
-        API -->|예약 저장| PG[("PostgreSQL · CNPG")]
-        API --> BK["Kafka: booking.created"]
-        BK --> PAY["Payment Consumer · 모의 결제"]
-        PAY -->|결제 결과 저장| PG
-        PAY --> PC["Kafka: payment.completed"]
-        PC --> NOTI["Notification Consumer · 모의 알림"]
-        NOTI -->|처리 이력 저장| PG
-    end
-```
+![온프레미스 논리 아키텍처](images/phase-2/onprem-architecture.png)
+
+[원본 크기로 보기](images/phase-2/onprem-architecture.png) · 2차 프로젝트 발표자료 15쪽
 
 1. MetalLB·NGINX Ingress → API → Redis 대기열·좌석 선점 → PostgreSQL 예약 저장
 2. Kafka `booking.created` → Payment Consumer → 결제 저장 → `payment.completed` → Notification Consumer → 이력 저장
@@ -72,30 +60,9 @@ flowchart TB
 <details>
 <summary><strong>② 하이브리드 구성·처리 흐름 — 기존 서비스에 ROSA Consumer 추가</strong></summary>
 
-```mermaid
-flowchart TB
-    U["사용자"] --> ENTRY["MetalLB 서비스 VIP → NGINX Ingress"]
-    subgraph ONPREM["온프레미스 Kubernetes"]
-        ENTRY --> API["Backend API"]
-        API --> REDIS[("Redis Sentinel")]
-        API -->|예약 저장| PG[("PostgreSQL · CNPG")]
-        API --> BK["Kafka: booking.created"]
-        BK --> LPAY["온프레미스 Payment Consumer"]
-        LPAY -->|결제 결과 저장| PG
-        LPAY --> PC["Kafka: payment.completed"]
-        PC --> LNOTI["온프레미스 Notification Consumer"]
-        LNOTI -->|처리 이력 저장| PG
-    end
-    subgraph AWS["AWS · ROSA HCP"]
-        CPAY["ROSA Payment Consumer"]
-        CNOTI["ROSA Notification Consumer"]
-    end
-    BK -->|Tailscale 경유 · 파티션 분담| CPAY
-    CPAY -->|Tailscale 경유 · 결제 결과 저장| PG
-    CPAY -->|Tailscale 경유 · 이벤트 발행| PC
-    PC -->|Tailscale 경유 · 파티션 분담| CNOTI
-    CNOTI -->|Tailscale 경유 · 처리 이력 저장| PG
-```
+![하이브리드 논리 아키텍처](images/phase-2/hybrid-architecture.png)
+
+[원본 크기로 보기](images/phase-2/hybrid-architecture.png) · 2차 프로젝트 발표자료 43쪽
 
 1. 요청 진입, Redis 선점, PostgreSQL 저장과 Kafka 이벤트 발행은 온프레미스에서 수행합니다.
 2. 양쪽 Payment Consumer가 같은 결제 Consumer Group에서 파티션을 분담하고, 결제 후 `payment.completed`를 발행합니다. Notification Consumer도 같은 알림 Consumer Group에서 분담 처리합니다.
@@ -108,29 +75,9 @@ flowchart TB
 <details>
 <summary><strong>③ Full AWS 구성·처리 흐름 — API·데이터·Consumer를 AWS에 배치</strong></summary>
 
-```mermaid
-flowchart TB
-    U["사용자"]
-    subgraph AWS["AWS VPC"]
-        LB["AWS Load Balancer"]
-        subgraph ROSA["ROSA HCP · ticketrail-full"]
-            ROUTE["OpenShift Router · Route"]
-            ROUTE --> API["Backend API"]
-            PAY["Payment Consumer · 모의 결제"]
-            NOTI["Notification Consumer · 모의 알림"]
-        end
-        LB --> ROUTE
-        API --> VALKEY[("ElastiCache for Valkey: 대기열·좌석 임시 선점")]
-        API -->|예약 저장| RDS[("Amazon RDS for PostgreSQL")]
-        API --> BK["Amazon MSK: booking.created"]
-        BK --> PAY
-        PAY -->|결제 결과 저장| RDS
-        PAY --> PC["Amazon MSK: payment.completed"]
-        PC --> NOTI
-        NOTI -->|처리 이력 저장| RDS
-    end
-    U --> LB
-```
+![Full AWS 논리 아키텍처](images/phase-2/full-aws-architecture.png)
+
+[원본 크기로 보기](images/phase-2/full-aws-architecture.png) · 2차 프로젝트 발표자료 48쪽
 
 1. AWS Load Balancer·OpenShift Route → ROSA API → Valkey 대기열·좌석 선점 → RDS 예약 저장
 2. MSK `booking.created` → Payment Consumer → RDS 결제 저장 → MSK `payment.completed` → Notification Consumer → RDS 이력 저장

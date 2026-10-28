@@ -1,0 +1,24 @@
+{
+  "source_document": "2차 프로젝트 발표자료.pptx",
+  "source_sha256": "71777012bf5fd4977d69cc53e7af8415b87c36cc85bdacbd5cc02eff5524b708",
+  "assets": [
+    {
+      "file": "onprem-architecture.png",
+      "slide": 15,
+      "method": "Slide render at initial animation state; entrance-only demonstration overlays omitted.",
+      "sha256": "e85f28a3cd6ff3e3638469d49d56ebbe30fad89eefb45b96b3fe09c8eaa69ef6"
+    },
+    {
+      "file": "hybrid-architecture.png",
+      "slide": 43,
+      "method": "Original embedded image ppt/media/image92.png, unchanged.",
+      "sha256": "699fd5a08dbcbb50182397f8a56a3dd876868fc855dec318b5c42a2adaf2005a"
+    },
+    {
+      "file": "full-aws-architecture.png",
+      "slide": 48,
+      "method": "Original embedded image ppt/media/image95.png, unchanged.",
+      "sha256": "4cd7e9e9f0780efadadd82e2911ffe759a885e897ed8e6dcb4dbc7cf2309fd29"
+    }
+  ]
+}
