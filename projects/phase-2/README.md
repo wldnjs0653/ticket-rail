@@ -66,7 +66,7 @@ docker compose -f docker-compose.local.yml exec -T app node local/smoke.js
 docker compose -f docker-compose.local.yml down
 ```
 
-검증 스크립트는 날짜별 열차 생성, 대기열·입장, 좌석 선점, 예약 저장, 같은 키의 예약 재요청, Kafka 결제 처리와 알림 완료 이력을 확인하며 성공 시 `PASS`를 출력합니다. 실행할 때마다 사용 가능한 좌석 1개를 예약합니다. 3000번 포트가 사용 중이면 Compose의 `TICKETRAIL_LOCAL_PORT` 환경변수를 다른 포트로 지정합니다.
+검증 스크립트는 날짜별 열차 생성, 대기열·입장, 좌석 선점, 예약 저장, 같은 키의 예약 재요청, Kafka 결제 처리와 알림 완료 이력을 확인하며 성공 시 `PASS`를 출력합니다. 2026년 10월 28일 [GitHub Actions의 Ubuntu 실행 환경에서 전체 흐름 검증이 통과했습니다](https://github.com/wldnjs0653/ticket-rail/actions/runs/40608620614/job/122554321675). 실행할 때마다 사용 가능한 좌석 1개를 예약합니다. 3000번 포트가 사용 중이면 Compose의 `TICKETRAIL_LOCAL_PORT` 환경변수를 다른 포트로 지정합니다.
 
 ### 초기화 자료와 데이터 보존
 

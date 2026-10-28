@@ -392,5 +392,3 @@ ALTER TABLE ONLY public.seat
 --
 -- PostgreSQL database dump complete
 --
-
-

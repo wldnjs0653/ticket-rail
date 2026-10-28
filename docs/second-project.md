@@ -164,6 +164,7 @@ DR 검증은 온프레미스 애플리케이션 중단에 따른 AWS 전환과 �
 | 자료 | 확인 위치 |
 | --- | --- |
 | 소스 개요·출처·실행 방법 | [2차 소스 README](../projects/phase-2/README.md) |
+| 로컬 예매·결제·알림 체험 | [Docker Compose 실행 안내](../projects/phase-2/README.md#로컬에서-예매-흐름-실행) |
 | Consumer 병렬 처리 | [src/consumers](../projects/phase-2/src/consumers) |
 | Redis·PostgreSQL 연결과 장애 대응 | [src/clients](../projects/phase-2/src/clients) |
 | ROSA 배포·하이브리드 KEDA | [k8s_playbooks/rosa](../projects/phase-2/k8s_playbooks/rosa) |
