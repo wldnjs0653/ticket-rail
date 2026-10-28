@@ -33,3 +33,24 @@ jobs:
       - name: Check JavaScript syntax
         run: find src test -type f -name '*.js' -print0 | xargs -0 -n 1 node --check
       - run: npm test
+
+  local-demo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: projects/phase-2
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check Compose configuration
+        run: docker compose -f docker-compose.local.yml config --quiet
+      - name: Start local dependencies and application
+        run: docker compose -f docker-compose.local.yml up --build --wait --wait-timeout 240
+      - name: Verify booking, Kafka payment and notification
+        run: docker compose -f docker-compose.local.yml exec -T app node local/smoke.js
+      - name: Show service logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.local.yml logs --no-color --tail=100
+      - name: Stop isolated demo and remove its test data
+        if: always()
+        run: docker compose -f docker-compose.local.yml down --volumes

@@ -104,7 +104,7 @@
     },
     {
       "source": "docker-compose.local.yml",
-      "destination": "docker-compose.local.yml",
+      "destination": "local/docker-compose.upstream.yml.txt",
       "git_mode": "0o664",
       "source_sha256": "61647ae7fbed3ee6ed27a272dea5b5112dca46f4bcdbc9b3fdab72b7044597bb",
       "portfolio_sha256": "46a22c734d0af68f6c4be45b74fdceaa43ab55dc1c5be48e87b6bf4c6e73d7f5"
@@ -974,7 +974,14 @@
     "Source files copied from a pinned upstream commit, excluding four historical backup files.",
     "Original README.md retained as UPSTREAM_README.md; original CLAUDE.md retained as UPSTREAM_NOTES.md for historical reference.",
     "Original GitHub workflows retained as ci-reference/*.yml.txt, outside the executable workflow directory.",
-    "README.md and SOURCE.json added for portfolio navigation and provenance; unit tests run with dependencies installed locally."
+    "README.md and SOURCE.json added for portfolio navigation and provenance; unit tests run with dependencies installed locally.",
+    "Original docker-compose.local.yml retained as local/docker-compose.upstream.yml.txt; active Compose replaced by a portfolio-only local demo. Added src/db/schema.sql adapted for PostgreSQL 16 from the retained schema dump, local seed/smoke files, and local-demo CI. Original application code unchanged."
   ],
-  "checksum_note": "source_sha256 hashes the original source bytes; portfolio_sha256 hashes the Git index bytes after repository line-ending normalization."
+  "checksum_note": "source_sha256 hashes the original source bytes; portfolio_sha256 hashes the Git index bytes after repository line-ending normalization.",
+  "portfolio_additions": [
+    "docker-compose.local.yml",
+    "src/db/schema.sql",
+    "local/seed.sql",
+    "local/smoke.js"
+  ]
 }

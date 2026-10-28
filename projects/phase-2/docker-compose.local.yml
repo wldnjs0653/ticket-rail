@@ -1,13 +1,15 @@
-version: "3.8"
+name: ticketrail-phase2-local
 
-# 실제 인프라(.110~.112) 붙기 전에, 로컬에서 먼저 동시성 버그를 잡기 위한 최소 구성.
-# 이걸로 먼저 검증하고, 통과하면 그 다음에 실제 클러스터 대상으로 같은 테스트를 돌린다.
-
+# Portfolio demo: single-node dependencies and the original API/Consumers.
+# Separate from the Kubernetes/ROSA performance and failover environments.
 services:
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
 
   postgres:
     image: postgres:16-alpine
@@ -15,19 +17,101 @@ services:
       POSTGRES_DB: ticketing
       POSTGRES_USER: ticketing_app
       POSTGRES_PASSWORD: localtest
-    ports:
-      - "5432:5432"
     volumes:
-      - ./src/db/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+      - postgres-data:/var/lib/postgresql/data
+      - type: bind
+        source: ./src/db/schema.sql
+        target: /docker-entrypoint-initdb.d/001-schema.sql
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./local/seed.sql
+        target: /docker-entrypoint-initdb.d/002-seed.sql
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ticketing_app -d ticketing"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
 
   kafka:
-    image: bitnami/kafka:3.7
-    ports:
-      - "9092:9092"
+    image: apache/kafka:3.9.1
     environment:
-      KAFKA_CFG_NODE_ID: 0
-      KAFKA_CFG_PROCESS_ROLES: controller,broker
-      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
-      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
-      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 15s
+
+  kafka-init:
+    image: apache/kafka:3.9.1
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-ec"]
+    command:
+      - |
+        for topic in booking.created payment.requested payment.completed notification.requested; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$$topic" --partitions 3 --replication-factor 1
+        done
+
+  app:
+    build: .
+    ports:
+      - "127.0.0.1:${TICKETRAIL_LOCAL_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      PG_HOST: postgres
+      PG_PORT: 5432
+      PG_DATABASE: ticketing
+      PG_USER: ticketing_app
+      PG_PASSWORD: localtest
+      REDIS_MODE: direct
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_CLIENT_ID: ticketrail-phase2-local
+      KAFKA_CONSUMER_GROUP: ticketrail-phase2-local
+      SKIP_KAFKA_CONSUMERS: "false"
+      MOCK_PAYMENT_FAILURE_RATE: 0
+    volumes:
+      - type: bind
+        source: ./local/smoke.js
+        target: /app/local/smoke.js
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  postgres-data:
