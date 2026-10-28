@@ -1,7 +1,5 @@
 # TicketRail ② 하이브리드 클라우드 확장 및 성능 검증
 
-## Kubernetes 기반 티켓 예매 서비스의 하이브리드 클라우드 확장과 성능 검증
-
 1차 프로젝트의 온프레미스 Kubernetes 티켓 예매 서비스를 기반으로 Consumer 처리 병목을 분석하고, 하이브리드와 Full AWS 환경으로 확장해 예매부터 모의 결제·알림까지의 처리와 장애 복구를 검증했습니다.
 
 - 기간: 2026.09.28 ~ 2026.10.26
@@ -20,29 +18,103 @@ AWS 네트워크와 Terraform·ROSA 인프라 구축, 환경 간 연결 및 DR �
 
 ## 구성과 처리 흐름
 
+세 환경은 같은 예매 업무를 처리하며, API·데이터·Consumer의 배치와 연결 경로를 단계적으로 확장했습니다. 결제와 알림은 모의 서비스로 검증했습니다.
+
+| 환경 | 사용자 요청·데이터 위치 | 결제·알림 처리 위치 |
+| --- | --- | --- |
+| 온프레미스 | Kubernetes API · Redis Sentinel · PostgreSQL(CNPG) · Kafka | 온프레미스 Kubernetes |
+| 하이브리드 | 온프레미스 API·데이터 계층 유지 | 온프레미스와 AWS ROSA가 분담, Tailscale로 연결 |
+| Full AWS | ROSA API · ElastiCache for Valkey · RDS for PostgreSQL · MSK | AWS ROSA |
+
+### 1. 온프레미스: 기존 Kubernetes에서 전체 예매 흐름 처리
+
+애플리케이션·모니터링 Worker와 데이터 Worker를 분리하고, Kubernetes 내부에서 API와 결제·알림 Consumer, 데이터 계층을 운영했습니다.
+
 ```mermaid
-flowchart LR
-    U[사용자 요청] --> API[대기열 · 좌석 선점 · 예약 API]
-    API --> DATA[(Redis · PostgreSQL)]
-    API --> KAFKA[Kafka]
-    KAFKA --> PAY[결제 Consumer]
-    PAY --> NOTI[알림 Consumer]
-    NOTI --> RESULT[처리 결과 저장]
+flowchart TB
+    U["사용자"] --> ENTRY["MetalLB 서비스 VIP → NGINX Ingress"]
+    subgraph ONPREM["온프레미스 Kubernetes"]
+        ENTRY --> API["Backend API"]
+        API --> REDIS[("Redis Sentinel: 대기열·좌석 임시 선점")]
+        API -->|예약 저장| PG[("PostgreSQL · CNPG")]
+        API --> BK["Kafka: booking.created"]
+        BK --> PAY["Payment Consumer · 모의 결제"]
+        PAY -->|결제 결과 저장| PG
+        PAY --> PC["Kafka: payment.completed"]
+        PC --> NOTI["Notification Consumer · 모의 알림"]
+        NOTI -->|처리 이력 저장| PG
+    end
 ```
 
-| 환경 | 애플리케이션·데이터 | 결제·알림 처리 |
-| --- | --- | --- |
-| 온프레미스 | Kubernetes와 온프레미스 데이터 계층 | 온프레미스 Consumer |
-| 하이브리드 | 온프레미스 애플리케이션·데이터 계층 | 온프레미스와 ROSA Consumer가 분담 |
-| Full AWS | ROSA와 AWS 관리형 데이터·메시징 서비스 | ROSA Consumer |
+1. 사용자 요청이 MetalLB 서비스 VIP와 NGINX Ingress를 거쳐 Backend API에 도착합니다.
+2. API가 Redis에서 대기열 등록·입장 승인·좌석 임시 선점을 처리하고 예약 정보를 PostgreSQL에 저장한 뒤, Kafka의 `booking.created` 이벤트를 발행합니다.
+3. Payment Consumer가 모의 결제를 처리하고 결과를 저장한 뒤 `payment.completed` 이벤트를 발행합니다. Notification Consumer가 이 이벤트를 받아 모의 알림과 처리 이력 저장을 수행합니다.
+4. 사용자는 API로 처리 상태를 조회합니다. API는 HPA로, Consumer는 Kafka Lag를 기준으로 KEDA로 확장합니다.
 
+### 2. 하이브리드: 온프레미스 서비스를 유지하고 ROSA Consumer로 분산
 
-- **온프레미스:** Kubernetes에서 애플리케이션, Redis, PostgreSQL, Kafka와 Consumer 운영
-- **하이브리드:** 온프레미스 데이터 계층과 AWS ROSA에 추가된 결제·알림 Consumer를 사설 경로로 연결
-- **Full AWS:** ROSA와 AWS 관리형 데이터·메시징 서비스를 이용해 전체 서비스 흐름 구성
-- **자동화·관측:** Terraform, Ansible, GitHub Actions, HPA, KEDA, Prometheus, Grafana, k6
+사용자 진입점과 API·Redis·PostgreSQL·Kafka는 온프레미스에 유지하고, AWS ROSA HCP에 결제·알림 Consumer를 추가했습니다. 양쪽 Tailscale Subnet Router를 통해 ROSA Consumer가 온프레미스 Kafka와 PostgreSQL에 접근합니다.
 
-사용자 요청은 대기열과 좌석 선점, 예약을 거쳐 Kafka 기반 결제·알림 처리로 이어집니다. 결제와 알림은 모의 서비스로 검증했습니다.
+```mermaid
+flowchart TB
+    U["사용자"] --> ENTRY["MetalLB 서비스 VIP → NGINX Ingress"]
+    subgraph ONPREM["온프레미스 Kubernetes"]
+        ENTRY --> API["Backend API"]
+        API --> REDIS[("Redis Sentinel")]
+        API -->|예약 저장| PG[("PostgreSQL · CNPG")]
+        API --> BK["Kafka: booking.created"]
+        BK --> LPAY["온프레미스 Payment Consumer"]
+        LPAY -->|결제 결과 저장| PG
+        LPAY --> PC["Kafka: payment.completed"]
+        PC --> LNOTI["온프레미스 Notification Consumer"]
+        LNOTI -->|처리 이력 저장| PG
+    end
+    subgraph AWS["AWS · ROSA HCP"]
+        CPAY["ROSA Payment Consumer"]
+        CNOTI["ROSA Notification Consumer"]
+    end
+    BK -->|Tailscale 경유 · 파티션 분담| CPAY
+    CPAY -->|Tailscale 경유 · 결제 결과 저장| PG
+    CPAY -->|Tailscale 경유 · 이벤트 발행| PC
+    PC -->|Tailscale 경유 · 파티션 분담| CNOTI
+    CNOTI -->|Tailscale 경유 · 처리 이력 저장| PG
+```
+
+1. 사용자 요청은 온프레미스 API로 들어오며, 대기열·좌석 선점·예약 저장과 `booking.created` 발행도 온프레미스에서 수행합니다.
+2. 온프레미스와 ROSA의 Payment Consumer가 **동일한 결제 Consumer Group**에 참여해 Kafka 파티션을 나누어 처리합니다. ROSA Consumer의 Kafka 구독·발행과 PostgreSQL 접근은 Tailscale 경로를 사용합니다.
+3. 결제 결과를 온프레미스 PostgreSQL에 저장하고 온프레미스 Kafka에 `payment.completed`를 발행합니다. 양쪽 Notification Consumer도 **동일한 알림 Consumer Group**에서 파티션을 나누어 모의 알림을 처리하고 이력을 저장합니다.
+4. 각 클러스터의 KEDA가 해당 환경의 Consumer Pod 수를 조정하고, Kafka가 공통 Consumer Group 내 파티션을 재분배합니다. 그림의 두 갈래는 같은 이벤트의 중복 처리가 아니라 처리 작업의 분담을 나타냅니다.
+
+### 3. Full AWS: API·Consumer·데이터 계층을 AWS에 구성
+
+ROSA HCP에 Backend API와 결제·알림 Consumer를 배포하고, 데이터 계층을 AWS 관리형 서비스로 구성했습니다. ROSA Worker와 데이터 서비스는 VPC의 Private Subnet에 배치했습니다.
+
+```mermaid
+flowchart TB
+    U["사용자"] --> LB["AWS Load Balancer"]
+    subgraph AWS["AWS VPC"]
+        subgraph ROSA["ROSA HCP · ticketrail-full"]
+            LB --> ROUTE["OpenShift Router · Route"]
+            ROUTE --> API["Backend API"]
+            PAY["Payment Consumer · 모의 결제"]
+            NOTI["Notification Consumer · 모의 알림"]
+        end
+        API --> VALKEY[("ElastiCache for Valkey: 대기열·좌석 임시 선점")]
+        API -->|예약 저장| RDS[("Amazon RDS for PostgreSQL")]
+        API --> BK["Amazon MSK: booking.created"]
+        BK --> PAY
+        PAY -->|결제 결과 저장| RDS
+        PAY --> PC["Amazon MSK: payment.completed"]
+        PC --> NOTI
+        NOTI -->|처리 이력 저장| RDS
+    end
+```
+
+1. 사용자 요청이 AWS Load Balancer와 OpenShift Route를 통해 ROSA의 Backend API로 전달됩니다.
+2. API가 ElastiCache for Valkey에서 대기열·입장·좌석 임시 상태를 관리하고, 예약 정보를 RDS for PostgreSQL에 저장한 뒤 MSK에 `booking.created`를 발행합니다.
+3. ROSA Payment Consumer가 모의 결제를 처리하고 RDS에 결과를 저장한 뒤 MSK에 `payment.completed`를 발행합니다. Notification Consumer는 이 이벤트로 모의 알림을 처리하고 RDS에 이력을 저장합니다.
+4. API는 HPA로, Consumer는 MSK Lag를 기준으로 KEDA로 확장합니다. 정상 예매 업무의 API·데이터·이벤트 처리는 AWS 내부에서 이어집니다.
+
 
 ## 주요 검증 결과
 
@@ -72,7 +144,15 @@ DR 검증은 온프레미스 애플리케이션 중단에 따른 AWS 전환과 �
 
 ## 사용 기술
 
-Linux · Kubernetes · ROSA · AWS · Kafka · Redis · PostgreSQL · KEDA · Terraform · Ansible · GitHub Actions · Prometheus · Grafana · k6
+| 목적 | 사용 기술 |
+| --- | --- |
+| 인프라·컨테이너 플랫폼 | Linux · VMware · Kubernetes · ROSA HCP(OpenShift) · AWS |
+| 서비스 진입·환경 간 연결 | MetalLB · NGINX Ingress · OpenShift Route · AWS Load Balancer · Tailscale Subnet Router |
+| 데이터·이벤트 처리 | Redis Sentinel · PostgreSQL(CloudNativePG) · Kafka · Amazon RDS for PostgreSQL · Amazon MSK · ElastiCache for Valkey |
+| 자동 확장 | HPA · KEDA · ROSA Worker 자동 확장 |
+| IaC·배포 자동화 | Terraform · Ansible · GitHub Actions |
+| 모니터링·성능 검증 | Prometheus · Grafana · k6 |
+| 재해 복구 전환 | CloudWatch · Route 53 |
 
 ## 구현 소스 안내
 
