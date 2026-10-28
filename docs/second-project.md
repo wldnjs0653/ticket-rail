@@ -91,14 +91,16 @@ ROSA HCP에 Backend API와 결제·알림 Consumer를 배포하고, 데이터 �
 
 ```mermaid
 flowchart TB
-    U["사용자"] --> LB["AWS Load Balancer"]
+    U["사용자"]
     subgraph AWS["AWS VPC"]
+        LB["AWS Load Balancer"]
         subgraph ROSA["ROSA HCP · ticketrail-full"]
-            LB --> ROUTE["OpenShift Router · Route"]
+            ROUTE["OpenShift Router · Route"]
             ROUTE --> API["Backend API"]
             PAY["Payment Consumer · 모의 결제"]
             NOTI["Notification Consumer · 모의 알림"]
         end
+        LB --> ROUTE
         API --> VALKEY[("ElastiCache for Valkey: 대기열·좌석 임시 선점")]
         API -->|예약 저장| RDS[("Amazon RDS for PostgreSQL")]
         API --> BK["Amazon MSK: booking.created"]
@@ -108,6 +110,7 @@ flowchart TB
         PC --> NOTI
         NOTI -->|처리 이력 저장| RDS
     end
+    U --> LB
 ```
 
 1. 사용자 요청이 AWS Load Balancer와 OpenShift Route를 통해 ROSA의 Backend API로 전달됩니다.
