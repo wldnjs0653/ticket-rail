@@ -1,0 +1,93 @@
+name: Supporting Images CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "ticketing-consumer-mock/**"
+      - ".github/workflows/supporting-images.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "ticketing-consumer-mock/**"
+      - ".github/workflows/supporting-images.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  supporting_images:
+    name: Validate and publish ${{ matrix.image_name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image_name: ticketing-mock-payment
+            context: ticketing-consumer-mock/mock-payment
+          - image_name: ticketing-mock-notification
+            context: ticketing-consumer-mock/mock-notification
+          - image_name: ticketing-notification-consumer
+            context: ticketing-consumer-mock/notification-consumer
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: ${{ matrix.context }}/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ${{ matrix.context }}
+        run: npm ci
+
+      - name: Run component tests
+        working-directory: ${{ matrix.context }}
+        run: npm test
+
+      - name: Calculate immutable image reference
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE_REF="ghcr.io/${GITHUB_REPOSITORY_OWNER}/${{ matrix.image_name }}:sha-${GITHUB_SHA::12}"
+          echo "IMAGE_REF=${IMAGE_REF}" >> "${GITHUB_ENV}"
+          echo "Image: ${IMAGE_REF}"
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+      - name: Build component image
+        run: |
+          docker build \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --tag "${IMAGE_REF}" \
+            "${{ matrix.context }}"
+
+      - name: Push component image
+        if: github.event_name != 'pull_request'
+        run: docker push "${IMAGE_REF}"
+
+      - name: Write image information
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "Published ${IMAGE_REF}" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Log out from GHCR
+        if: always() && github.event_name != 'pull_request'
+        run: docker logout ghcr.io || true

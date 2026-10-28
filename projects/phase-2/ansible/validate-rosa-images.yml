@@ -1,0 +1,227 @@
+---
+- name: Validate ROSA container compatibility
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    test_uid: "1001230000:0"
+    evidence_directory: /root/evidence/rosa-preflight
+
+    image_checks:
+      - name: mock-payment
+        image: localhost/rosa-ci-check/mock-payment:test
+        source: src/server.js
+      - name: mock-notification
+        image: localhost/rosa-ci-check/mock-notification:test
+        source: src/server.js
+      - name: notification-consumer
+        image: localhost/rosa-ci-check/notification-consumer:test
+        source: src/index.js
+
+    mock_services:
+      - name: mock-payment
+        image: localhost/rosa-ci-check/mock-payment:test
+        host_port: 18080
+        container_port: 8080
+      - name: mock-notification
+        image: localhost/rosa-ci-check/mock-notification:test
+        host_port: 18081
+        container_port: 8081
+
+  tasks:
+    - name: Create evidence directory
+      ansible.builtin.file:
+        path: "{{ evidence_directory }}"
+        state: directory
+        mode: "0700"
+
+    - name: Check images with an OpenShift-style arbitrary UID
+      ansible.builtin.command:
+        argv:
+          - podman
+          - run
+          - --rm
+          - --user
+          - "{{ test_uid }}"
+          - --security-opt
+          - label=disable
+          - --entrypoint
+          - sh
+          - "{{ item.image }}"
+          - -ec
+          - >-
+            id;
+            test -r {{ item.source }};
+            test -w /tmp;
+            node --check {{ item.source }}
+      loop: "{{ image_checks }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: static_results
+      changed_when: false
+      failed_when: false
+
+    - name: Remove old test containers
+      ansible.builtin.command:
+        argv:
+          - podman
+          - rm
+          - --force
+          - "rosa-preflight-{{ item.name }}"
+      loop: "{{ mock_services }}"
+      loop_control:
+        label: "{{ item.name }}"
+      changed_when: false
+      failed_when: false
+
+    - name: Start mock services with an arbitrary UID
+      ansible.builtin.command:
+        argv:
+          - podman
+          - run
+          - --detach
+          - --name
+          - "rosa-preflight-{{ item.name }}"
+          - --user
+          - "{{ test_uid }}"
+          - --security-opt
+          - label=disable
+          - --publish
+          - "127.0.0.1:{{ item.host_port }}:{{ item.container_port }}"
+          - "{{ item.image }}"
+      loop: "{{ mock_services }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: runtime_start
+      changed_when: true
+      failed_when: false
+
+    - name: Wait for mock service ports
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: "{{ item.host_port }}"
+        state: started
+        timeout: 20
+      loop: "{{ mock_services }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: port_results
+      failed_when: false
+
+    - name: Verify mock readiness endpoints
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ item.host_port }}/health/ready"
+        method: GET
+        status_code: 200
+        return_content: true
+      loop: "{{ mock_services }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: health_results
+      failed_when: false
+
+    - name: Remove test containers
+      ansible.builtin.command:
+        argv:
+          - podman
+          - rm
+          - --force
+          - "rosa-preflight-{{ item.name }}"
+      loop: "{{ mock_services }}"
+      loop_control:
+        label: "{{ item.name }}"
+      changed_when: false
+      failed_when: false
+
+    - name: Create temporary Redis data directory
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: rosa-redis-
+      register: redis_directory
+
+    - name: Allow an arbitrary UID group to write Redis data
+      ansible.builtin.file:
+        path: "{{ redis_directory.path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0770"
+
+    - name: Validate Redis with an arbitrary UID
+      ansible.builtin.command:
+        argv:
+          - podman
+          - run
+          - --rm
+          - --user
+          - "{{ test_uid }}"
+          - --security-opt
+          - label=disable
+          - --volume
+          - "{{ redis_directory.path }}:/data"
+          - --entrypoint
+          - sh
+          - docker.io/library/redis:8.2.1-alpine
+          - -ec
+          - >-
+            id;
+            touch /data/arbitrary-uid-test;
+            redis-server --version;
+            rm -f /data/arbitrary-uid-test
+      register: redis_result
+      changed_when: false
+      failed_when: false
+
+    - name: Remove temporary Redis directory
+      ansible.builtin.file:
+        path: "{{ redis_directory.path }}"
+        state: absent
+
+    - name: Write validation evidence
+      ansible.builtin.copy:
+        dest: "{{ evidence_directory }}/image-validation.txt"
+        mode: "0600"
+        content: |
+          ROSA arbitrary UID validation
+          UID={{ test_uid }}
+
+          Static image checks:
+          {% for result in static_results.results %}
+          - {{ result.item.name }}: rc={{ result.rc }}
+          {% endfor %}
+
+          Runtime start checks:
+          {% for result in runtime_start.results %}
+          - {{ result.item.name }}: rc={{ result.rc }}
+          {% endfor %}
+
+          Readiness checks:
+          {% for result in health_results.results %}
+          - {{ result.item.name }}: status={{ result.status | default("unavailable") }}
+          {% endfor %}
+
+          Redis check:
+          - redis: rc={{ redis_result.rc }}
+
+    - name: Assert all compatibility checks passed
+      ansible.builtin.assert:
+        that:
+          - >-
+            static_results.results
+            | selectattr('rc', 'ne', 0)
+            | list
+            | length == 0
+          - >-
+            runtime_start.results
+            | selectattr('rc', 'ne', 0)
+            | list
+            | length == 0
+          - >-
+            health_results.results
+            | selectattr('status', 'ne', 200)
+            | list
+            | length == 0
+          - redis_result.rc == 0
+        success_msg: "ROSA IMAGE COMPATIBILITY: ALL PASS"
+        fail_msg: "ROSA IMAGE COMPATIBILITY: FAILED"

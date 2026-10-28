@@ -1,0 +1,38 @@
+controller:
+  kind: deployment
+
+  replicaCount: 2
+
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: DoNotSchedule
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: nginx-ingress
+          app.kubernetes.io/instance: nginx-ingress
+
+  ingressClass:
+    name: nginx
+    create: true
+    setAsDefaultIngress: true
+
+  service:
+    create: true
+    type: LoadBalancer
+    loadBalancerIP: 10.1.93.69
+    externalTrafficPolicy: Local
+
+    httpPort:
+      enable: true
+      port: 80
+      targetPort: 80
+
+    httpsPort:
+      enable: true
+      port: 443
+      targetPort: 443
+
+  reportIngressStatus:
+    enable: true
+    enableLeaderElection: true

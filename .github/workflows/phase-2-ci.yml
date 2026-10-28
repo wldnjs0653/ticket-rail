@@ -1,0 +1,35 @@
+name: Phase 2 source checks
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'projects/phase-2/**'
+      - '.github/workflows/phase-2-ci.yml'
+  pull_request:
+    paths:
+      - 'projects/phase-2/**'
+      - '.github/workflows/phase-2-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: projects/phase-2
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: projects/phase-2/package-lock.json
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Check JavaScript syntax
+        run: find src test -type f -name '*.js' -print0 | xargs -0 -n 1 node --check
+      - run: npm test

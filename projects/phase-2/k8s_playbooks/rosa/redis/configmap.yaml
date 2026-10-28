@@ -1,0 +1,91 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-ha-config
+  namespace: data
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/part-of: ticketing-platform
+data:
+  prepare.sh: "#!/bin/sh\nset -eu\n\npod_ordinal=\"${HOSTNAME##*-}\"\nnamespace=\"\
+    ${POD_NAMESPACE}\"\ninitial_master=\"redis-0.redis-headless.${namespace}.svc.cluster.local\"\
+    \nsentinel_file=\"/data/sentinel/sentinel.conf\"\n\nmkdir -p /runtime /data/sentinel\n\
+    sed \"s/__REDIS_PASSWORD__/${REDIS_PASSWORD}/g\" \\\n  /bootstrap/redis.conf.template\
+    \ > /runtime/redis.conf\n\ncurrent_master=\"\"\npeer=0\nwhile [ \"${peer}\" -lt\
+    \ \"${REDIS_REPLICAS}\" ]; do\n  peer_host=\"redis-${peer}.redis-headless.${namespace}.svc.cluster.local\"\
+    \n  current_master=\"$(redis-cli --no-auth-warning -a \"${REDIS_PASSWORD}\" \\\
+    \n    -h \"${peer_host}\" -p 26379 --raw SENTINEL \\\n    get-master-addr-by-name\
+    \ \"${REDIS_MASTER_NAME}\" 2>/dev/null \\\n    | sed -n '1p' || true)\"\n  [ -n\
+    \ \"${current_master}\" ] && break\n  peer=$((peer + 1))\ndone\n\nif [ -z \"${current_master}\"\
+    \ ]; then\n  if [ \"${pod_ordinal}\" != \"0\" ]; then\n    printf '\\nreplicaof\
+    \ %s 6379\\n' \"${initial_master}\" >> /runtime/redis.conf\n  fi\nelse\n  pod_fqdn=\"\
+    ${HOSTNAME}.redis-headless.${namespace}.svc.cluster.local\"\n  pod_ip=\"$(hostname\
+    \ -i | awk '{print $1}')\"\n  case \"${current_master}\" in\n    \"${HOSTNAME}\"\
+    |\"${pod_fqdn}\"|\"${pod_ip}\") ;;\n    *) printf '\\nreplicaof %s 6379\\n' \"\
+    ${current_master}\" >> /runtime/redis.conf ;;\n  esac\nfi\n\nif [ ! -s \"${sentinel_file}\"\
+    \ ]; then\n  sed \\\n    -e \"s/__REDIS_PASSWORD__/${REDIS_PASSWORD}/g\" \\\n\
+    \    -e \"s/__MASTER_NAME__/${REDIS_MASTER_NAME}/g\" \\\n    -e \"s|__INITIAL_MASTER__|${initial_master}|g\"\
+    \ \\\n    -e \"s/__QUORUM__/${REDIS_SENTINEL_QUORUM}/g\" \\\n    -e \"s/__DOWN_AFTER_MS__/${REDIS_SENTINEL_DOWN_AFTER_MS}/g\"\
+    \ \\\n    -e \"s/__FAILOVER_TIMEOUT_MS__/${REDIS_SENTINEL_FAILOVER_TIMEOUT_MS}/g\"\
+    \ \\\n    /bootstrap/sentinel.conf.template > \"${sentinel_file}\"\nfi\n\nchmod\
+    \ 0600 /runtime/redis.conf \"${sentinel_file}\"\n"
+  redis.conf.template: 'bind 0.0.0.0
+
+    port 6379
+
+    protected-mode yes
+
+    requirepass __REDIS_PASSWORD__
+
+    masterauth __REDIS_PASSWORD__
+
+    appendonly yes
+
+    appendfsync everysec
+
+    aof-use-rdb-preamble yes
+
+    dir /data
+
+    dbfilename dump.rdb
+
+    replica-read-only yes
+
+    replica-priority 100
+
+    min-replicas-to-write 1
+
+    min-replicas-max-lag 10
+
+    maxmemory-policy noeviction
+
+    timeout 0
+
+    tcp-keepalive 300
+
+    '
+  sentinel.conf.template: 'bind 0.0.0.0
+
+    port 26379
+
+    protected-mode yes
+
+    requirepass __REDIS_PASSWORD__
+
+    dir /tmp
+
+    sentinel resolve-hostnames yes
+
+    sentinel announce-hostnames yes
+
+    sentinel monitor __MASTER_NAME__ __INITIAL_MASTER__ 6379 __QUORUM__
+
+    sentinel auth-pass __MASTER_NAME__ __REDIS_PASSWORD__
+
+    sentinel down-after-milliseconds __MASTER_NAME__ __DOWN_AFTER_MS__
+
+    sentinel failover-timeout __MASTER_NAME__ __FAILOVER_TIMEOUT_MS__
+
+    sentinel parallel-syncs __MASTER_NAME__ 1
+
+    '

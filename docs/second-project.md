@@ -76,16 +76,20 @@ Linux · Kubernetes · ROSA · AWS · Kafka · Redis · PostgreSQL · KEDA · Te
 
 ## 구현 소스 안내
 
-2차 프로젝트의 구현은 [공동 저장소](https://github.com/jisoo9123/ticketing-project)에서 확인할 수 있습니다. 2026년 10월 28일 공개 브랜치를 확인한 결과, 최신 애플리케이션 변경은 `fix/payment-delay-confirmation-ui`에 있으며 `main`보다 6개 커밋 앞서 있습니다.
+2차 프로젝트 소스를 이 포트폴리오 저장소의 [`projects/phase-2`](../projects/phase-2)에 분리해 추가했습니다.
 
 | 자료 | 확인 위치 |
 | --- | --- |
-| 성능 튜닝이 통합된 기준 | [main](https://github.com/jisoo9123/ticketing-project/tree/main) |
-| 날짜 선택·결제 상태 화면까지 반영한 변경 | [fix/payment-delay-confirmation-ui](https://github.com/jisoo9123/ticketing-project/tree/fix/payment-delay-confirmation-ui) |
-| Consumer 처리 코드 | [src/consumers](https://github.com/jisoo9123/ticketing-project/tree/fix/payment-delay-confirmation-ui/src/consumers) |
-| ROSA 배포·하이브리드 KEDA 구성 | [k8s_playbooks/rosa](https://github.com/jisoo9123/ticketing-project/tree/fix/payment-delay-confirmation-ui/k8s_playbooks/rosa) |
-| 온프레미스 KEDA 구성 | [consumer-keda.yaml](https://github.com/jisoo9123/ticketing-project/blob/fix/payment-delay-confirmation-ui/k8s_playbooks/app/consumer-keda.yaml) |
+| 소스 개요·출처·실행 방법 | [2차 소스 README](../projects/phase-2/README.md) |
+| Consumer 병렬 처리 | [src/consumers](../projects/phase-2/src/consumers) |
+| Redis·PostgreSQL 연결과 장애 대응 | [src/clients](../projects/phase-2/src/clients) |
+| ROSA 배포·하이브리드 KEDA | [k8s_playbooks/rosa](../projects/phase-2/k8s_playbooks/rosa) |
+| 온프레미스 KEDA | [consumer-keda.yaml](../projects/phase-2/k8s_playbooks/app/consumer-keda.yaml) |
+| PostgreSQL 장애 전환 설정 | [postgresql.yml](../projects/phase-2/Data_Monitoring_playbooks/postgresql.yml) |
+| 원본 경로와 체크섬 | [SOURCE.json](../projects/phase-2/SOURCE.json) |
 
-공동 저장소에서 Redis·PostgreSQL 복구 개선과 Consumer 병렬 처리 이력을 확인했습니다. Terraform 파일과 Full AWS 최종 성능 시험에 사용한 전체 설정·결과 원본은 확인한 브랜치에서 찾지 못해, 해당 구현 자료의 공개 범위와 보고서의 시험 성과를 구분합니다.
+원본은 [공동 저장소](https://github.com/jisoo9123/ticketing-project)의 `fix/payment-delay-confirmation-ui` 브랜치이며, [커밋 `3a97332`](https://github.com/jisoo9123/ticketing-project/commit/3a97332d37dad13485b9bcc450d84d0a5988526c)을 기준으로 반영했습니다. 원본 저자와 팀 공동 기여를 유지하고 개인 담당 업무를 위에 구분했습니다.
+
+Terraform 파일과 Full AWS 최종 성능 시험의 전체 설정·결과 원본은 이 소스 브랜치에 포함되어 있지 않습니다. 가져온 구현 자료와 보고서의 시험 성과를 구분해 소개합니다.
 
 [TicketRail 전체 소개](../README.md) · [1차 프로젝트 상세](first-project.md)

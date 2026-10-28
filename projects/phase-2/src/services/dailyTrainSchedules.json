@@ -1,0 +1,310 @@
+[
+  {
+    "title": "KTX 101 서울-부산",
+    "departure": "06:00:00",
+    "durationMinutes": 152,
+    "price": 59800,
+    "seats": 200
+  },
+  {
+    "title": "ITX-새마을 1021 서울-대전",
+    "departure": "07:20:00",
+    "durationMinutes": 98,
+    "price": 16000,
+    "seats": 200
+  },
+  {
+    "title": "ITX-새마을 1001 서울-부산",
+    "departure": "07:30:00",
+    "durationMinutes": 290,
+    "price": 42600,
+    "seats": 200
+  },
+  {
+    "title": "ITX-새마을 1031 서울-대구",
+    "departure": "07:40:00",
+    "durationMinutes": 185,
+    "price": 31400,
+    "seats": 200
+  },
+  {
+    "title": "KTX 103 서울-부산",
+    "departure": "08:00:00",
+    "durationMinutes": 154,
+    "price": 59800,
+    "seats": 200
+  },
+  {
+    "title": "KTX 401 서울-광주",
+    "departure": "08:25:00",
+    "durationMinutes": 114,
+    "price": 47100,
+    "seats": 200
+  },
+  {
+    "title": "무궁화호 1201 서울-부산",
+    "departure": "09:15:00",
+    "durationMinutes": 333,
+    "price": 28600,
+    "seats": 200
+  },
+  {
+    "title": "KTX 201 서울-대전",
+    "departure": "09:30:00",
+    "durationMinutes": 62,
+    "price": 23700,
+    "seats": 200
+  },
+  {
+    "title": "KTX 105 서울-부산",
+    "departure": "10:00:00",
+    "durationMinutes": 157,
+    "price": 59800,
+    "seats": 200
+  },
+  {
+    "title": "KTX 301 서울-대구",
+    "departure": "10:10:00",
+    "durationMinutes": 108,
+    "price": 43500,
+    "seats": 200
+  },
+  {
+    "title": "ITX-새마을 1051 서울-전주",
+    "departure": "10:30:00",
+    "durationMinutes": 172,
+    "price": 27600,
+    "seats": 200
+  },
+  {
+    "title": "무궁화호 1221 서울-대전",
+    "departure": "11:10:00",
+    "durationMinutes": 117,
+    "price": 10800,
+    "seats": 200
+  },
+  {
+    "title": "무궁화호 1231 서울-대구",
+    "departure": "11:20:00",
+    "durationMinutes": 214,
+    "price": 21400,
+    "seats": 200
+  },
+  {
+    "title": "KTX 107 서울-부산",
+    "departure": "12:00:00",
+    "durationMinutes": 148,
+    "price": 59800,
+    "seats": 200
+  },
+  {
+    "title": "ITX-새마을 1041 서울-광주",
+    "departure": "13:00:00",
+    "durationMinutes": 212,
+    "price": 33000,
+    "seats": 200
+  },
+  {
+    "title": "KTX 109 서울-부산",
+    "departure": "14:00:00",
+    "durationMinutes": 156,
+    "price": 59800,
+    "seats": 200
+  },
+  {
+    "title": "ITX-새마을 1023 서울-대전",
+    "departure": "15:10:00",
+    "durationMinutes": 98,
+    "price": 16000,
+    "seats": 200
+  },
+  {
+    "title": "ITX-새마을 1003 서울-부산",
+    "departure": "15:20:00",
+    "durationMinutes": 288,
+    "price": 42600,
+    "seats": 200
+  },
+  {
+    "title": "ITX-새마을 1033 서울-대구",
+    "departure": "15:30:00",
+    "durationMinutes": 184,
+    "price": 31400,
+    "seats": 200
+  },
+  {
+    "title": "KTX 111 서울-부산",
+    "departure": "16:00:00",
+    "durationMinutes": 152,
+    "price": 59800,
+    "seats": 200
+  },
+  {
+    "title": "무궁화호 1251 서울-전주",
+    "departure": "16:40:00",
+    "durationMinutes": 201,
+    "price": 18700,
+    "seats": 200
+  },
+  {
+    "title": "무궁화호 1203 서울-부산",
+    "departure": "17:10:00",
+    "durationMinutes": 332,
+    "price": 28600,
+    "seats": 200
+  },
+  {
+    "title": "KTX 113 서울-부산",
+    "departure": "18:00:00",
+    "durationMinutes": 155,
+    "price": 59800,
+    "seats": 200
+  },
+  {
+    "title": "무궁화호 1241 서울-광주",
+    "departure": "18:10:00",
+    "durationMinutes": 242,
+    "price": 22900,
+    "seats": 200
+  },
+  {
+    "title": "무궁화호 1233 서울-대구",
+    "departure": "18:10:00",
+    "durationMinutes": 215,
+    "price": 21400,
+    "seats": 200
+  },
+  {
+    "title": "무궁화호 1223 서울-대전",
+    "departure": "18:20:00",
+    "durationMinutes": 118,
+    "price": 10800,
+    "seats": 200
+  },
+  {
+    "title": "KTX 115 서울-부산",
+    "departure": "20:00:00",
+    "durationMinutes": 151,
+    "price": 59800,
+    "seats": 200
+  },
+  {
+    "title": "KTX 501 서울-광주",
+    "departure": "06:15:00",
+    "durationMinutes": 110,
+    "price": 47000,
+    "seats": 200
+  },
+  {
+    "title": "무궁화 1201 서울-부산",
+    "departure": "06:30:00",
+    "durationMinutes": 340,
+    "price": 28600,
+    "seats": 200
+  },
+  {
+    "title": "KTX 401 서울-대구",
+    "departure": "06:40:00",
+    "durationMinutes": 105,
+    "price": 43500,
+    "seats": 200
+  },
+  {
+    "title": "KTX-이음 801 서울-강릉",
+    "departure": "07:20:00",
+    "durationMinutes": 114,
+    "price": 27600,
+    "seats": 200
+  },
+  {
+    "title": "ITX-새마을 1011 서울-부산",
+    "departure": "07:30:00",
+    "durationMinutes": 258,
+    "price": 42600,
+    "seats": 200
+  },
+  {
+    "title": "ITX-청춘 2001 서울-부산",
+    "departure": "08:00:00",
+    "durationMinutes": 315,
+    "price": 32800,
+    "seats": 200
+  },
+  {
+    "title": "ITX-새마을 1021 서울-전주",
+    "departure": "08:00:00",
+    "durationMinutes": 190,
+    "price": 27200,
+    "seats": 200
+  },
+  {
+    "title": "KTX 102 부산-서울",
+    "departure": "13:00:00",
+    "durationMinutes": 152,
+    "price": 59800,
+    "seats": 200
+  },
+  {
+    "title": "KTX 502 광주-서울",
+    "departure": "13:15:00",
+    "durationMinutes": 110,
+    "price": 47000,
+    "seats": 200
+  },
+  {
+    "title": "무궁화 1202 부산-서울",
+    "departure": "13:30:00",
+    "durationMinutes": 340,
+    "price": 28600,
+    "seats": 200
+  },
+  {
+    "title": "KTX 402 대구-서울",
+    "departure": "13:40:00",
+    "durationMinutes": 105,
+    "price": 43500,
+    "seats": 200
+  },
+  {
+    "title": "KTX 104 부산-서울",
+    "departure": "14:00:00",
+    "durationMinutes": 148,
+    "price": 59800,
+    "seats": 200
+  },
+  {
+    "title": "KTX 202 대전-서울",
+    "departure": "14:10:00",
+    "durationMinutes": 60,
+    "price": 23700,
+    "seats": 200
+  },
+  {
+    "title": "KTX-이음 802 강릉-서울",
+    "departure": "14:20:00",
+    "durationMinutes": 114,
+    "price": 27600,
+    "seats": 200
+  },
+  {
+    "title": "ITX-새마을 1012 부산-서울",
+    "departure": "14:30:00",
+    "durationMinutes": 258,
+    "price": 42600,
+    "seats": 200
+  },
+  {
+    "title": "ITX-청춘 2002 부산-서울",
+    "departure": "15:00:00",
+    "durationMinutes": 315,
+    "price": 32800,
+    "seats": 200
+  },
+  {
+    "title": "ITX-새마을 1022 전주-서울",
+    "departure": "15:00:00",
+    "durationMinutes": 190,
+    "price": 27200,
+    "seats": 200
+  }
+]

@@ -1,0 +1,980 @@
+{
+  "repository": "https://github.com/jisoo9123/ticketing-project",
+  "branch": "fix/payment-delay-confirmation-ui",
+  "commit": "3a97332d37dad13485b9bcc450d84d0a5988526c",
+  "import_date": "2026-10-28",
+  "files": [
+    {
+      "source": ".dockerignore",
+      "destination": ".dockerignore",
+      "git_mode": "0o664",
+      "source_sha256": "9c99cf5bcd982005d9277fcc938756eb5332ccc4cdbdf400d3ba0341e549e34c",
+      "portfolio_sha256": "632e667e19d127a542b147104b0c71c8a07d19c6d29f7bdb101f54fb19f46bdc"
+    },
+    {
+      "source": ".env.example",
+      "destination": ".env.example",
+      "git_mode": "0o664",
+      "source_sha256": "5cf1af8f5038c4273e7d7041c3bb311e0345ed15ffb9e780d121e0b4c7e347a8",
+      "portfolio_sha256": "a05c141718ef8bf67cc31535f54f842a864f6a076d62e84d8a768274dc296f45"
+    },
+    {
+      "source": ".github/workflows/ci.yml",
+      "destination": "ci-reference/ci.yml.txt",
+      "git_mode": "0o664",
+      "source_sha256": "e6235f68eedc08eb54b43b7801b7c0e959f8431e61718271dd36c1de447da765",
+      "portfolio_sha256": "d0513058b20f388bd231e273e3adab88dec9e1eaa37858b98b59c60d125e471d"
+    },
+    {
+      "source": ".github/workflows/supporting-images.yml",
+      "destination": "ci-reference/supporting-images.yml.txt",
+      "git_mode": "0o664",
+      "source_sha256": "e58323e2f44c4d760265c596e5b4e4cbb4dd1ccbce0991fc9355a609b9ecfe3a",
+      "portfolio_sha256": "befd7b2574aada12f818817472d65afe11f94d75d55d79270b94aafe1a8e5ed4"
+    },
+    {
+      "source": ".gitignore",
+      "destination": ".gitignore",
+      "git_mode": "0o664",
+      "source_sha256": "bc6d8889dd4b065d4526bc3e83557b1c4beddd04a6b512a9f2f31212914c9bdf",
+      "portfolio_sha256": "e2f84fcb87369386a8faf130733c91d9de208dde90b081ca886287e40d6231fd"
+    },
+    {
+      "source": "CLAUDE.md",
+      "destination": "UPSTREAM_NOTES.md",
+      "git_mode": "0o664",
+      "source_sha256": "41e31fae7ac0a2a0c2ed0c89a570a5fe68ce65885006c55f6912748f99aaa4f2",
+      "portfolio_sha256": "ecab8dcc05fa3c06db544cdbd4634805722b591222b8f71db09d695822fbc388"
+    },
+    {
+      "source": "Data_Monitoring_playbooks/postgresql.yml",
+      "destination": "Data_Monitoring_playbooks/postgresql.yml",
+      "git_mode": "0o664",
+      "source_sha256": "6be94239598bbf35467405e6185a224eb7ec62e0dc1afb37b1e16c3846e1c583",
+      "portfolio_sha256": "cb8bba22ff76b71ec1dac9a14a4e7541d9689fe2eae9cc9ab090fbac1fc949c4"
+    },
+    {
+      "source": "Dockerfile",
+      "destination": "Dockerfile",
+      "git_mode": "0o664",
+      "source_sha256": "599f67922167ec734eaa79ef2df83cb2c627542a859c2dbff0344c55dd7e0675",
+      "portfolio_sha256": "7693f3de8a8859820b4d12fbd3a185b5278ecbdd1b752e9469abac5c5e29820e"
+    },
+    {
+      "source": "KAFKA_SETUP.md",
+      "destination": "KAFKA_SETUP.md",
+      "git_mode": "0o664",
+      "source_sha256": "2207db918c0a327ed620e1c9c0d29f20769d2477b0a0bbf83d98967f434c08a2",
+      "portfolio_sha256": "c50a6c1c2967082daae19cea57b56f3a3a89bca607f1f6f087dce712e3a5bcc6"
+    },
+    {
+      "source": "PAYMENT_UI_GUIDE.md",
+      "destination": "PAYMENT_UI_GUIDE.md",
+      "git_mode": "0o664",
+      "source_sha256": "f7b0c1dbb84850002ab374a421c19af1ce885d644dc20677359379d8ef2929dd",
+      "portfolio_sha256": "6e361a4251d8007b1f37b7c16dd0b9fec82a9a3c0c78b3631da0762c114ecd2f"
+    },
+    {
+      "source": "README.md",
+      "destination": "UPSTREAM_README.md",
+      "git_mode": "0o664",
+      "source_sha256": "e55a441fc5214cdc3968fd31d00341f41c800550a0bc1679afa95e02ae5d4039",
+      "portfolio_sha256": "57c1f59812cae9f4dd6aa190b27040363fe2ee11e287f51e631acb795406ebdc"
+    },
+    {
+      "source": "ansible/deploy-backend.yml",
+      "destination": "ansible/deploy-backend.yml",
+      "git_mode": "0o664",
+      "source_sha256": "45eac3ad6a2f13bf9fc831d31da5668536eb9430503f88da6251b42eca95a216",
+      "portfolio_sha256": "fbb82219b34493a8ae339e62b16078e74fc037464aa4eea6a3dee1e1b76e9e17"
+    },
+    {
+      "source": "ansible/deploy-consumers.yml",
+      "destination": "ansible/deploy-consumers.yml",
+      "git_mode": "0o664",
+      "source_sha256": "90accb83854beb79bf03864e515d151845701f764fccef93e5074bb4b8ffaa61",
+      "portfolio_sha256": "cf23aef20926b59466786943f6c1ecda836f34a5391a40b3ed85ea8f631216d8"
+    },
+    {
+      "source": "ansible/validate-rosa-images.yml",
+      "destination": "ansible/validate-rosa-images.yml",
+      "git_mode": "0o664",
+      "source_sha256": "1142619b750fff50a61137082be30e7cb90cb3a913b4e85605766d47c3ab3437",
+      "portfolio_sha256": "0596b64d084f0f5127b7bc4a097ad91c42e6ff7ec056e5a43dbfa846a5974d44"
+    },
+    {
+      "source": "docker-compose.local.yml",
+      "destination": "docker-compose.local.yml",
+      "git_mode": "0o664",
+      "source_sha256": "61647ae7fbed3ee6ed27a272dea5b5112dca46f4bcdbc9b3fdab72b7044597bb",
+      "portfolio_sha256": "46a22c734d0af68f6c4be45b74fdceaa43ab55dc1c5be48e87b6bf4c6e73d7f5"
+    },
+    {
+      "source": "docs/sustainable-capacity.md",
+      "destination": "docs/sustainable-capacity.md",
+      "git_mode": "0o664",
+      "source_sha256": "55f1a72902eb6dc7f6425ea165a314f03ad558486b49f69d9c7a42cc65090962",
+      "portfolio_sha256": "7bd186c6c30a9a922f1af9e71c18343c622b678c10e2720c1272e81ea1574489"
+    },
+    {
+      "source": "docs/waiting-room.md",
+      "destination": "docs/waiting-room.md",
+      "git_mode": "0o664",
+      "source_sha256": "5be11f2a7f8b1bedb350c4c93a7c72bcb02bd5288a651b054bca39bd889ba195",
+      "portfolio_sha256": "7cdbe609aad3628a2af3fb78f8715aaa5cb0be52e564c05e68a380f3311b1b1b"
+    },
+    {
+      "source": "failure-tests/postgresql-rto/k6-postgresql-read.sh",
+      "destination": "failure-tests/postgresql-rto/k6-postgresql-read.sh",
+      "git_mode": "0o775",
+      "source_sha256": "c07e84d3ee8f161a45f9afe77553d2648be79607c9c89ff792264fa34dcc5021",
+      "portfolio_sha256": "d9e2f9c9c96eeacd3ccd6ee94f6b1f5cd61ccb256d51ad4b18fffc49c5803345"
+    },
+    {
+      "source": "failure-tests/postgresql-rto/run-graceful-failover.sh",
+      "destination": "failure-tests/postgresql-rto/run-graceful-failover.sh",
+      "git_mode": "0o775",
+      "source_sha256": "146c82716f6555ff409430c11086979ab69f88bbbab79a6719691a52a1ac3e63",
+      "portfolio_sha256": "a91b5af1b0a7b0a831f697caac23cc4466da2b5fed9ec13d20b3a9b8797fcd1b"
+    },
+    {
+      "source": "k8s_playbooks/app/.gitkeep",
+      "destination": "k8s_playbooks/app/.gitkeep",
+      "git_mode": "0o664",
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "portfolio_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source": "k8s_playbooks/app/backend-deployment.yaml",
+      "destination": "k8s_playbooks/app/backend-deployment.yaml",
+      "git_mode": "0o664",
+      "source_sha256": "89115bf5960b51be03323f18e7c47902193214f631b51c2040b2d97c37d3b92b",
+      "portfolio_sha256": "fc2fa4346ab968ded9c957fa8e156cf1e8a7e848cf17508c8e2234baad2f0308"
+    },
+    {
+      "source": "k8s_playbooks/app/backend-service.yaml",
+      "destination": "k8s_playbooks/app/backend-service.yaml",
+      "git_mode": "0o664",
+      "source_sha256": "bfbab7882790104df809e92e1daeb77045dcc2703218424fed8a38654b48f818",
+      "portfolio_sha256": "22e19e0ecc07d42a35c76aed8833070d265d158e4aec5ea1b8e808bed18952d2"
+    },
+    {
+      "source": "k8s_playbooks/app/configmap.yaml",
+      "destination": "k8s_playbooks/app/configmap.yaml",
+      "git_mode": "0o664",
+      "source_sha256": "3570fe0d48eca4662298b157af47158ac7eefb24b9a3a33a3f0c1f5476ecb235",
+      "portfolio_sha256": "bcafa8d3ea8ec7ac37654074ef69f7d5310fe837e649da483dd464fc48dba6b3"
+    },
+    {
+      "source": "k8s_playbooks/app/consumer-deployments.yaml",
+      "destination": "k8s_playbooks/app/consumer-deployments.yaml",
+      "git_mode": "0o664",
+      "source_sha256": "61a45e57d8ea53f35ebb5abfcf74d03c518bee7c251b876ce742f0ca63ef3c9a",
+      "portfolio_sha256": "0f6dcc3d8ab73084952d37a5460c8fac0907b918641f90ded3305a62ebf6a286"
+    },
+    {
+      "source": "k8s_playbooks/app/consumer-keda.yaml",
+      "destination": "k8s_playbooks/app/consumer-keda.yaml",
+      "git_mode": "0o664",
+      "source_sha256": "395f2f9d48c1e48777217059b0ae773a46b0b6e2237f7de0cf5273247462b742",
+      "portfolio_sha256": "6aad382cdb4d6a5955196c6fe8c6b07a435cc98426bdee396cdbd2fb1b4fbd15"
+    },
+    {
+      "source": "k8s_playbooks/app/github-actions-deployer-rbac.yaml",
+      "destination": "k8s_playbooks/app/github-actions-deployer-rbac.yaml",
+      "git_mode": "0o664",
+      "source_sha256": "a1c7ba02226caddca7f6f08f381d81754c82212b9ec258411124cf2d34c068fc",
+      "portfolio_sha256": "7443b4b436b58601e792c6452c9476aa436d64dcf0c86ece126d2fd668a0767b"
+    },
+    {
+      "source": "k8s_playbooks/app/hpa.yaml",
+      "destination": "k8s_playbooks/app/hpa.yaml",
+      "git_mode": "0o664",
+      "source_sha256": "5f4947ccaa4193b15c2458d879499f3919aea5780e30f99be6dd917c22d5e1c2",
+      "portfolio_sha256": "c9dd9774383597d72dc3e3648a589a05ad72e4abca171209378f0d28b0dbaa04"
+    },
+    {
+      "source": "k8s_playbooks/app/ingress.yaml",
+      "destination": "k8s_playbooks/app/ingress.yaml",
+      "git_mode": "0o664",
+      "source_sha256": "250b2afc137aa43f8ff9e815d12e06779ed3215747bf1425af17b9faee245691",
+      "portfolio_sha256": "77bddfa17811208bec5f0d450e12fba12dd0a7d7dcc6f160f6e0e8aebbb57e59"
+    },
+    {
+      "source": "k8s_playbooks/cert-manager/api-nammer-store-prod-certificate.yaml",
+      "destination": "k8s_playbooks/cert-manager/api-nammer-store-prod-certificate.yaml",
+      "git_mode": "0o664",
+      "source_sha256": "36b8d0a8380580240f1a959b16fa0a8749b892b1b8cec5faca8d58c6c4d05e93",
+      "portfolio_sha256": "c9e8b8dc0004f2a555677d0c823de9e4b984b8e8f776aa7ef1fde8b7c41171cd"
+    },
+    {
+      "source": "k8s_playbooks/cert-manager/letsencrypt-prod.yaml",
+      "destination": "k8s_playbooks/cert-manager/letsencrypt-prod.yaml",
+      "git_mode": "0o664",
+      "source_sha256": "eacb996a5d582f0d7e330e1eee04a4ebb4310d39b4cfd523b33e17491f452031",
+      "portfolio_sha256": "db3e513e8794c86c798fed2280b12c369b4913519fba152e6338c6d7e1e8a529"
+    },
+    {
+      "source": "k8s_playbooks/data/kafka-topics.yaml",
+      "destination": "k8s_playbooks/data/kafka-topics.yaml",
+      "git_mode": "0o664",
+      "source_sha256": "725bd14110f636ea868bca50b5d19373c4f63d5e8ed4aa44cdc421cf5ab507c1",
+      "portfolio_sha256": "8097331ce66c7227d90f986d2d96a206697789f01b0d1f02b3ecd6fdc7333538"
+    },
+    {
+      "source": "k8s_playbooks/rosa/app/deployments.yaml",
+      "destination": "k8s_playbooks/rosa/app/deployments.yaml",
+      "git_mode": "0o664",
+      "source_sha256": "6270d63a0ec8099f5e1a409e7e3440ec67a2a5e7aa9e55776277724ec61d08c9",
+      "portfolio_sha256": "510d02ecf5420a7ecf3a11c49058f8580f61780a40c8896259c564a559403a00"
+    },
+    {
+      "source": "k8s_playbooks/rosa/app/kustomization.yaml",
+      "destination": "k8s_playbooks/rosa/app/kustomization.yaml",
+      "git_mode": "0o664",
+      "source_sha256": "32533da520109236c2f87a8b8183b1eb76785ae7ad407373fdf1b03f4ee1eba9",
+      "portfolio_sha256": "9dc6be1d407fd8c4c94fec13fa5b6f400e53bd7182d74264e9ba0f69089b3fa4"
+    },
+    {
+      "source": "k8s_playbooks/rosa/app/pdb.yaml",
+      "destination": "k8s_playbooks/rosa/app/pdb.yaml",
+      "git_mode": "0o664",
+      "source_sha256": "3de03dde08f182f603d714811d5103e0be67e5855c2e69c9a2aa739ff5ed25c0",
+      "portfolio_sha256": "9a46a9858d0fdb27e844bb870539de349a674b5e27733be6cce12b0ad142cba3"
+    },
+    {
+      "source": "k8s_playbooks/rosa/app/route.yaml",
+      "destination": "k8s_playbooks/rosa/app/route.yaml",
+      "git_mode": "0o664",
+      "source_sha256": "3105ccb9d72a44b8e8046c5a48b7a7baaa1fd16d17594b760c9dd7bdebba6e7e",
+      "portfolio_sha256": "166b2a87bf9bed6b45802f2deaef0badd5f7d811ba9912716a3fac894386e4ba"
+    },
+    {
+      "source": "k8s_playbooks/rosa/app/services.yaml",
+      "destination": "k8s_playbooks/rosa/app/services.yaml",
+      "git_mode": "0o664",
+      "source_sha256": "4a6e372e96537b22a5590a51149ef589323d39e7d252237bc160441b58d82964",
+      "portfolio_sha256": "3a82aa15a054f924ce6eeeb63551ba8eff9c798179e2a2610f749694445023e0"
+    },
+    {
+      "source": "k8s_playbooks/rosa/consumer-deployments.yaml",
+      "destination": "k8s_playbooks/rosa/consumer-deployments.yaml",
+      "git_mode": "0o664",
+      "source_sha256": "5fad1e917fddd98dcaf15ae382cfdadfc14058948651aa2b5e833503dd9e7649",
+      "portfolio_sha256": "b157072b3453a83e992a8c7b359339d7a5a55b4042f90fb92e91108c4ebdeb2d"
+    },
+    {
+      "source": "k8s_playbooks/rosa/consumer-keda.yaml",
+      "destination": "k8s_playbooks/rosa/consumer-keda.yaml",
+      "git_mode": "0o664",
+      "source_sha256": "036213a6bed001118960eb5007fd96e0c9b4e5f23d44ada97c32609b1e7d4c82",
+      "portfolio_sha256": "e53eb0f5f3336913b13577ede959332c276c9c092eedd0fe6953f3e49f697598"
+    },
+    {
+      "source": "k8s_playbooks/rosa/image-refs.env",
+      "destination": "k8s_playbooks/rosa/image-refs.env",
+      "git_mode": "0o664",
+      "source_sha256": "e64825d8405ebdb0ccd1fe72af84039189b215eacc07b0b17f42e3ff37d5054c",
+      "portfolio_sha256": "51b36296d20a5d3d91d379df174f20df2f4b878bba438486284c2fc74e9b8704"
+    },
+    {
+      "source": "k8s_playbooks/rosa/redis/configmap.yaml",
+      "destination": "k8s_playbooks/rosa/redis/configmap.yaml",
+      "git_mode": "0o664",
+      "source_sha256": "d8a9cb30476530f56b8bcf0cfbfc3f65e9ce7cfa67617bb75e58f20d1685e409",
+      "portfolio_sha256": "d7cfb45abc21a3b043ee51a51aeed3dbc73873f35f678f61769f559d6e0e47e1"
+    },
+    {
+      "source": "k8s_playbooks/rosa/redis/kustomization.yaml",
+      "destination": "k8s_playbooks/rosa/redis/kustomization.yaml",
+      "git_mode": "0o664",
+      "source_sha256": "2b754cbb740195787dbf8b434be8c33f5201dbba0ad5a5b3f8046fdff5ecdca0",
+      "portfolio_sha256": "57efd14c32ce023f3bf0d19c249a5acd5f36feb0950cc5a88b5212656d1fc613"
+    },
+    {
+      "source": "k8s_playbooks/rosa/redis/pdb.yaml",
+      "destination": "k8s_playbooks/rosa/redis/pdb.yaml",
+      "git_mode": "0o664",
+      "source_sha256": "35847c02f9539298179823dde459cfcb66b2db2f9f060b5afac76bf67ead3719",
+      "portfolio_sha256": "69252023dc1713a7e3e1db5fd2d8ab9d991bb3c88100370ec057cc7434babcc4"
+    },
+    {
+      "source": "k8s_playbooks/rosa/redis/services.yaml",
+      "destination": "k8s_playbooks/rosa/redis/services.yaml",
+      "git_mode": "0o664",
+      "source_sha256": "06a63e31fabc090c4697240fc2bdfbd167c7017e184203dd737c48ae8c5dfcf9",
+      "portfolio_sha256": "09d9dfb3d241fe08043693d68125de7c5ab763abdb8702ccdb50ad645f710260"
+    },
+    {
+      "source": "k8s_playbooks/rosa/redis/statefulset.yaml",
+      "destination": "k8s_playbooks/rosa/redis/statefulset.yaml",
+      "git_mode": "0o664",
+      "source_sha256": "d5c3fb1e6515b257950113440541c236d4a45f24dd65fc28001677bcf9e463d1",
+      "portfolio_sha256": "6c9538ec3e13c757d34b51c74f445436ea83ef33cd8288c26092bfa951e045ad"
+    },
+    {
+      "source": "metallb/01-metallb.yml",
+      "destination": "metallb/01-metallb.yml",
+      "git_mode": "0o664",
+      "source_sha256": "1b55be652301e8832d3ec8411c5cefbee6fcd1052855905a1241d6f1ab37455c",
+      "portfolio_sha256": "d6ec8955e0b55fabaf9f9c8b44de9bcb9dead88936f3c030e033f2d11ffe657f"
+    },
+    {
+      "source": "metallb/02-metallb-config.yml",
+      "destination": "metallb/02-metallb-config.yml",
+      "git_mode": "0o664",
+      "source_sha256": "d28e5b38e4a0622957f97d774afc152993321ebdb50711ed1a78374d38e933ea",
+      "portfolio_sha256": "4db1e7358e7494532e1ac3fc40c13809dc22daa793785db36c227b6a8b301db7"
+    },
+    {
+      "source": "metallb/nginx/rendered-nginx.yaml",
+      "destination": "metallb/nginx/rendered-nginx.yaml",
+      "git_mode": "0o664",
+      "source_sha256": "6c06d818be1fbe574722e105337fb13a728797f15e593d8daa3f1d8842e73ecd",
+      "portfolio_sha256": "0fbfe9c82e8bcb09d91e3a5561a7603290925d967960de9539643133646f3c5c"
+    },
+    {
+      "source": "metallb/nginx/test-echo-ingress.yaml",
+      "destination": "metallb/nginx/test-echo-ingress.yaml",
+      "git_mode": "0o664",
+      "source_sha256": "bd2de7fb7a05a38e9942ee6461438b6f00ce40381d6ae285c51149af53556444",
+      "portfolio_sha256": "68999c696ad8cddaca650d5d3c565d87da7fd1ed87d5cfe81b0a894d6883b508"
+    },
+    {
+      "source": "metallb/nginx/values.yaml",
+      "destination": "metallb/nginx/values.yaml",
+      "git_mode": "0o664",
+      "source_sha256": "949db5335d8a0b21e5f766a68c02179c8df05199e4f80cde0f42ecdca881275a",
+      "portfolio_sha256": "9b0afa2f718941c8e8ba7de5d70274520bc306eeb28039c30aa0c2d4e060f95d"
+    },
+    {
+      "source": "node_backend_tunnels.sh",
+      "destination": "node_backend_tunnels.sh",
+      "git_mode": "0o775",
+      "source_sha256": "6ec99e411fe41e5951a9d0576f162fc05d31af5c8c2faa77e1400ea115215668",
+      "portfolio_sha256": "bfea0387e087724a10995be816cb11b62c2dbf28377367069395bc9709c6f4b7"
+    },
+    {
+      "source": "package-lock.json",
+      "destination": "package-lock.json",
+      "git_mode": "0o664",
+      "source_sha256": "b2b820f557e4107e76df0c1bb1856222910986a221d495248af8038c65cc4524",
+      "portfolio_sha256": "e26894a0b28877278f09e9be370b3bb168d8e21035e6e23fced464864d218909"
+    },
+    {
+      "source": "package.json",
+      "destination": "package.json",
+      "git_mode": "0o664",
+      "source_sha256": "35e2c26c2b11cd59e8fa99e2adef59aed7f51118eb3230500a14cbbca98b0e54",
+      "portfolio_sha256": "da355a1ffa7e31f35badf1d0ca23fd8d341a83dc6e3b4b9e95ba2f025ae19d3d"
+    },
+    {
+      "source": "playbooks/01-common.yml",
+      "destination": "playbooks/01-common.yml",
+      "git_mode": "0o664",
+      "source_sha256": "1f822af33b252c61d4ee6de72cf146b9b6903e6bd5ee18d9c3603d79996a8ea3",
+      "portfolio_sha256": "9c787711382180119f0094e3856250aad5b4a4c9897d06e08bf98737e5195883"
+    },
+    {
+      "source": "playbooks/02-k8s-common.yml",
+      "destination": "playbooks/02-k8s-common.yml",
+      "git_mode": "0o664",
+      "source_sha256": "0748def3852209e47370e4c8332bfb822f37ddf10bb17f70db9c1063cf62a531",
+      "portfolio_sha256": "669eb56613a6acc19e9a4809628ed850b3bbe40fdfd022b34470798e50f24f55"
+    },
+    {
+      "source": "playbooks/03-containerd.yml",
+      "destination": "playbooks/03-containerd.yml",
+      "git_mode": "0o664",
+      "source_sha256": "af2677ea0e0b139d43f454ce7658c2ea00231cd02ba54d400e35802c69ee1767",
+      "portfolio_sha256": "cd5ce818bcb34b8244fb6750f6d28c91792a054b9e20f5a8e4583a395cf44087"
+    },
+    {
+      "source": "playbooks/04-k8s-prereq.yml",
+      "destination": "playbooks/04-k8s-prereq.yml",
+      "git_mode": "0o664",
+      "source_sha256": "9c328d23fd4e624d91a4a11729bd7f7c2ae8e4b961910c97a068369cf1b08912",
+      "portfolio_sha256": "e11fd33df9cc3e3d32a02670b290788c79b3afe159798106a1a55a9ab50d7840"
+    },
+    {
+      "source": "playbooks/05-kubernetes.yml",
+      "destination": "playbooks/05-kubernetes.yml",
+      "git_mode": "0o664",
+      "source_sha256": "ab9bb61c6e92f53cf0e9b3a8d1ff1c4c62bc7b5383a5d8bc7b0850d41a74b773",
+      "portfolio_sha256": "c25786ad840bb0f82750528baac9990a2453b91db2f71a0bc9a065228f52e103"
+    },
+    {
+      "source": "playbooks/06-lb.yml",
+      "destination": "playbooks/06-lb.yml",
+      "git_mode": "0o664",
+      "source_sha256": "fd8faf86fba1e9b9ecd281cf8a2fa4b82569ff59d8be93f7e6a5ce82e45ce209",
+      "portfolio_sha256": "4270165a7dfcf9656a7db8d9cc4413986d200db1b40a1b9adf06afe8a9e367ac"
+    },
+    {
+      "source": "playbooks/07-k8s-init.yml",
+      "destination": "playbooks/07-k8s-init.yml",
+      "git_mode": "0o664",
+      "source_sha256": "12de77410f57b62e977e1bff92dd963d14312e0b8f0a8f38f456598ba1f25e41",
+      "portfolio_sha256": "1ec16aea03c6ae96cfd41296d109127f01e1dc87eb724a9f002673dcd5106d01"
+    },
+    {
+      "source": "playbooks/08-control-plane-join.yml",
+      "destination": "playbooks/08-control-plane-join.yml",
+      "git_mode": "0o664",
+      "source_sha256": "b9085b0a3d924dd012d9ec940eb3cb1ea259d9b6d12147b8bdea614431ad644f",
+      "portfolio_sha256": "9a2510b0d5a15cd94e9186160f2337b99360ecdb39b34286c3894859c1399152"
+    },
+    {
+      "source": "playbooks/09-cni.yml",
+      "destination": "playbooks/09-cni.yml",
+      "git_mode": "0o664",
+      "source_sha256": "6a8196dc34277938f42b18c1e3ca639992c592931adeaac9f73f79e95950e359",
+      "portfolio_sha256": "dbf4e4f4f6e29c9837a5c4316580f4048c1106607aa020145f3f9c2f673ed7d8"
+    },
+    {
+      "source": "playbooks/10-worker-join.yml",
+      "destination": "playbooks/10-worker-join.yml",
+      "git_mode": "0o664",
+      "source_sha256": "e8a1488d4e79bd32c92056d1a039e929fad9ed577498a8f62dc00e3273e6641c",
+      "portfolio_sha256": "b9c69a1f8d9fbdee3b4f54334a72e6009eecf774279100f2a1dce0cc2a7fa26e"
+    },
+    {
+      "source": "playbooks/11-worker-storage.yml",
+      "destination": "playbooks/11-worker-storage.yml",
+      "git_mode": "0o664",
+      "source_sha256": "be41666aa7a5a48dbc109e7e2b399fddd02fd97c365f752f66ef9ae2e0d87b0a",
+      "portfolio_sha256": "e3868302e0e632cdc95e8968d5fe98934c9fc1823816a77473a71ae189b51ba1"
+    },
+    {
+      "source": "playbooks/12-k8s-local-pv.yml",
+      "destination": "playbooks/12-k8s-local-pv.yml",
+      "git_mode": "0o664",
+      "source_sha256": "d0bbe83f08c712cad0849f6cb1ad5527f7920a479542de7f285d8d7778be6ed7",
+      "portfolio_sha256": "ed65235a5891e415f5590b98a0f0f420021414d3957c385a2841e6bde1cd86f1"
+    },
+    {
+      "source": "playbooks/13-monitoring-storage.yml",
+      "destination": "playbooks/13-monitoring-storage.yml",
+      "git_mode": "0o664",
+      "source_sha256": "32d74798dea2f76d9367d6530bf37bc920f3301fe305d8957233b88474f51983",
+      "portfolio_sha256": "7628db2da14c8420d60b56616e30a6ce11294181b81f394e72511868739b23c0"
+    },
+    {
+      "source": "playbooks/14-data-worker-join.yml",
+      "destination": "playbooks/14-data-worker-join.yml",
+      "git_mode": "0o664",
+      "source_sha256": "21fe572cc95bce1c5025c3c0bdc579d9076f38d4fde454fafaa14193d7146e08",
+      "portfolio_sha256": "7a0c11bc3cccedef7089c323687d62497d097b9dce06b82b035e0df0ccd0f2dd"
+    },
+    {
+      "source": "playbooks/site-k8s.yml",
+      "destination": "playbooks/site-k8s.yml",
+      "git_mode": "0o664",
+      "source_sha256": "5e5db700177750d7d0932434fcc0ad3cb7fb3c34f3d346a459f469e5cb1b88e7",
+      "portfolio_sha256": "6fcf532cac043ecace1652299dbb68aecc2730dd569c961f78b7b00ab50364f7"
+    },
+    {
+      "source": "scripts/deploy-backend-only.sh",
+      "destination": "scripts/deploy-backend-only.sh",
+      "git_mode": "0o664",
+      "source_sha256": "5bc2e959e71a07548a29830342899d812e596428b0823a669b13dff1a53815ec",
+      "portfolio_sha256": "5e974c44d07209d3b201d466b2d417caab1a685cac397d37d874c40b326d8292"
+    },
+    {
+      "source": "src/clients/kafkaClient.js",
+      "destination": "src/clients/kafkaClient.js",
+      "git_mode": "0o664",
+      "source_sha256": "ab53a664a25d82709d8e12ad1ad3dc893df876bdad3d1d496b6b678979fd2be5",
+      "portfolio_sha256": "fec77dd6766d125c36eda7a024e1abf1223504664fee9901c10fc163cc8a199d"
+    },
+    {
+      "source": "src/clients/pgClient.js",
+      "destination": "src/clients/pgClient.js",
+      "git_mode": "0o664",
+      "source_sha256": "3777b57a3b9da2aea0d4b317be8d259585255c0a99fb0edf7e0e47c319827280",
+      "portfolio_sha256": "d0be2fb46e2b929116fcfcf0ea7eaf330bb9d8decbc113b65dff49ef3f7e9226"
+    },
+    {
+      "source": "src/clients/redisClient.js",
+      "destination": "src/clients/redisClient.js",
+      "git_mode": "0o664",
+      "source_sha256": "91b983dcd22778f1d26d1d55f230091d829fa10059058b21abf04df4873f2ac8",
+      "portfolio_sha256": "48a105d615d309f92ce2f256a560ab8cc2e10c1930bf64fc9b287fedc9c1a328"
+    },
+    {
+      "source": "src/config.js",
+      "destination": "src/config.js",
+      "git_mode": "0o664",
+      "source_sha256": "508eec8c40a96df8c932ca25a270034881316d7daeed1b816f42ee0f0de56559",
+      "portfolio_sha256": "1578ef7e4d0a921139c31ba413ad1c2219f30b41812a653762060d9a3154f07f"
+    },
+    {
+      "source": "src/consumers/main.js",
+      "destination": "src/consumers/main.js",
+      "git_mode": "0o664",
+      "source_sha256": "4fddcbde1214d1a68642c9cd76c0d178a1a5c080ccc083b00958318fc057db19",
+      "portfolio_sha256": "ad4abf295f1338fba65774820d84c3298baa2d77361f5b35fd1ed22584202032"
+    },
+    {
+      "source": "src/consumers/notificationConsumer.js",
+      "destination": "src/consumers/notificationConsumer.js",
+      "git_mode": "0o664",
+      "source_sha256": "b96ab40f30474a4527a908e55ab8c7131979bf88f474654be293b4f96d6fd30f",
+      "portfolio_sha256": "bb8f4357b59082b33ad1ebc6e0fc27f5c64b2363c79d7db58288e060b84cf876"
+    },
+    {
+      "source": "src/consumers/paymentConsumer.js",
+      "destination": "src/consumers/paymentConsumer.js",
+      "git_mode": "0o664",
+      "source_sha256": "4edb3ef0e9bf6fdce088dfd2a1d78e6603754ca61d613e7fb2741771fbd2719b",
+      "portfolio_sha256": "422697d466faaaf36dd8e70e1a9d7d2cc8468e610ca6d91fe5ec7fdf9603a780"
+    },
+    {
+      "source": "src/db/schema-reference_2026-09-03.sql",
+      "destination": "src/db/schema-reference_2026-09-03.sql",
+      "git_mode": "0o664",
+      "source_sha256": "097bc779181bfa6bf40af821d671dd7730961a3967fbe05907a7a954e1cad962",
+      "portfolio_sha256": "8a3625f6a4c4856333d1d040f20ef7dfd9f1021268930f65f3fcd17fdff59afb"
+    },
+    {
+      "source": "src/db/schema_deprecated_2026-09-03.sql",
+      "destination": "src/db/schema_deprecated_2026-09-03.sql",
+      "git_mode": "0o664",
+      "source_sha256": "54b005f8ad6063987da38b89200e197d608813cb14cd81c0346654759e3c47c4",
+      "portfolio_sha256": "b9ddc1849c35d6c6b1ea246bc463cb2e58a1bc15737893502600b9d3092f0d42"
+    },
+    {
+      "source": "src/db/ticketing-table-schema_2026-09-03.sql",
+      "destination": "src/db/ticketing-table-schema_2026-09-03.sql",
+      "git_mode": "0o664",
+      "source_sha256": "ac531f75a48507101aa5e534399f06e3870f7b983f22dc6f0f67b967956af651",
+      "portfolio_sha256": "819a69442dd70367f36d879b6eb910b1cf1e693a163fbb45970246e7d62b9f60"
+    },
+    {
+      "source": "src/events/eventContract.js",
+      "destination": "src/events/eventContract.js",
+      "git_mode": "0o664",
+      "source_sha256": "95c4d5ad10ee7c188d795dc92472628a8513ab77d753561f7c4ff7f7f4393a88",
+      "portfolio_sha256": "7a6760bd3f8f297bc8baf5cc01c9d73b9c43d3b19cf16ebe5532cd3d2f9c32e8"
+    },
+    {
+      "source": "src/metrics.js",
+      "destination": "src/metrics.js",
+      "git_mode": "0o664",
+      "source_sha256": "37027e0e8a375f8be7b7e20b6b0f33d8d184fb312295b1b42f9051ccc8819a18",
+      "portfolio_sha256": "8f0e08cc057d5ddedbe4a9fc701791110a21ec61cbd96869a45aa01d3f0f3bf0"
+    },
+    {
+      "source": "src/middleware/idempotency.js",
+      "destination": "src/middleware/idempotency.js",
+      "git_mode": "0o664",
+      "source_sha256": "9100116d905e25dde7cdcf827848e1e5e4221698802c73751ab815c6bc1e4b6e",
+      "portfolio_sha256": "150a8e2739ac5dc7e97b5f04bac83cd4e1065bd505282c76a9cb90e0750bfe2b"
+    },
+    {
+      "source": "src/mock/mockNotification.js",
+      "destination": "src/mock/mockNotification.js",
+      "git_mode": "0o664",
+      "source_sha256": "5f88f86858475d599ea81f8dd119c6f2a004e94ab6c7b9bb44ce2792f9e96d4c",
+      "portfolio_sha256": "29a75e1f41dc930879a13cfcd2df0e47045ee83ca3af6ba4cce4dd794b89c4c5"
+    },
+    {
+      "source": "src/mock/mockPayment.js",
+      "destination": "src/mock/mockPayment.js",
+      "git_mode": "0o664",
+      "source_sha256": "63e27d7c26c529e8fb5f11848414da44dfe993e18752f64e2ee821b344ba8e4d",
+      "portfolio_sha256": "d82351561209d9cded646c4a6f9db18ef8b8d6b1c4f8fe336f7818c2f5ab44f6"
+    },
+    {
+      "source": "src/public/assets/ticketrail-main-hero-v2.png",
+      "destination": "src/public/assets/ticketrail-main-hero-v2.png",
+      "git_mode": "0o664",
+      "source_sha256": "8cd7039f2693b5d1ab849e87c0a09e973379548f04e23964ffe85f4ebb8d6374",
+      "portfolio_sha256": "8cd7039f2693b5d1ab849e87c0a09e973379548f04e23964ffe85f4ebb8d6374"
+    },
+    {
+      "source": "src/public/index.html",
+      "destination": "src/public/index.html",
+      "git_mode": "0o664",
+      "source_sha256": "5c6a8f6dbd380f5335b00d8e6fe8dc2f3a8ddc1ca31f5036a66fc809642d65a6",
+      "portfolio_sha256": "8d1c1cf9db52294f35cacb7ad5042c3a7cad92704c705fd2f81a8dab3dcb3be7"
+    },
+    {
+      "source": "src/public/login.html",
+      "destination": "src/public/login.html",
+      "git_mode": "0o664",
+      "source_sha256": "272d55e67be9435996ec6922eccdfceb6a507e1f0d492f0890fe0c3241693689",
+      "portfolio_sha256": "0116aa64679c3695b8efad0a0c126049da0b0a5c4b201062a78c8b924cb18a41"
+    },
+    {
+      "source": "src/public/payment-status.js",
+      "destination": "src/public/payment-status.js",
+      "git_mode": "0o664",
+      "source_sha256": "80f90cee9aaa91ed5fa41ad4ff8e0fc5bfbae6bc616c7bf50d9ab98d845ec255",
+      "portfolio_sha256": "b03b1910a6823ade31035cb29f5942ae866ba003cc2e7139d59b5a7c9fd70cb9"
+    },
+    {
+      "source": "src/public/ticketing.html",
+      "destination": "src/public/ticketing.html",
+      "git_mode": "0o664",
+      "source_sha256": "715e25010c7ccf35642c021580b000be05867ddfb973235e8d29231275defdfc",
+      "portfolio_sha256": "51279bef9cd0fc6bd70ab64a3ab9a09648060338d641c622891f8a760bc7244f"
+    },
+    {
+      "source": "src/routes/auth.js",
+      "destination": "src/routes/auth.js",
+      "git_mode": "0o664",
+      "source_sha256": "74a5c909c849c40f66313f133946f3103bf7f4db2b52056268524ce20334d52d",
+      "portfolio_sha256": "bd955093a0f37964a5f09c10b6cee5860422ac76b3a7db090a73ea28d0268433"
+    },
+    {
+      "source": "src/routes/booking.js",
+      "destination": "src/routes/booking.js",
+      "git_mode": "0o664",
+      "source_sha256": "e8c2ca3a9ed3378c5b6e721da873385d9291ba849544a293b11db136a8e56041",
+      "portfolio_sha256": "61fdff4edb66aa812de0b90fe64997af3ef9870fe15555bd7dd3d49dc81f65c4"
+    },
+    {
+      "source": "src/routes/event.js",
+      "destination": "src/routes/event.js",
+      "git_mode": "0o664",
+      "source_sha256": "b1d159ad78598de4f1f1d1df86b80b1eb43555109ba9c983dc0e818398fab5e0",
+      "portfolio_sha256": "71925d361e3e5c42a1910ced443240e05a7f4e58953b80eb35c8b5f659cf83c8"
+    },
+    {
+      "source": "src/routes/health.js",
+      "destination": "src/routes/health.js",
+      "git_mode": "0o664",
+      "source_sha256": "0f6a35f6c9c556876f99de93b3e83ffd4f7ac75d67e62d77464aca50695399ed",
+      "portfolio_sha256": "8c44a192e74969942d72785bd31e805f764d414406b9bb39f556e77f671a0df8"
+    },
+    {
+      "source": "src/routes/payment.js",
+      "destination": "src/routes/payment.js",
+      "git_mode": "0o664",
+      "source_sha256": "b8e54ae7e0d5f940994b8a15863ff658ed4c06b868d0887263c3fb03c7199f06",
+      "portfolio_sha256": "324b0d8f1472a97ec86ba7d5981a9ccdcac203e9d596a25d77eed27947cdac6c"
+    },
+    {
+      "source": "src/routes/queue.js",
+      "destination": "src/routes/queue.js",
+      "git_mode": "0o664",
+      "source_sha256": "e756fc1b10a0bc278c7f4c95474fdf0af26c9b09321ccec7902d3bb470dcf35f",
+      "portfolio_sha256": "7977c1b65a905374fa2d33b0e1695d6331017bcdb18e37b7bfed0a04caad4318"
+    },
+    {
+      "source": "src/routes/seat.js",
+      "destination": "src/routes/seat.js",
+      "git_mode": "0o664",
+      "source_sha256": "1e74dac794a6d503c5a07bc58058ac9990feb6f1dd6ed3d4e661ad9f8a059ac2",
+      "portfolio_sha256": "00f954380d58e2e0dac8396366afe78b6ebc78e91722b2ef3c56ff5b9454561d"
+    },
+    {
+      "source": "src/server.js",
+      "destination": "src/server.js",
+      "git_mode": "0o664",
+      "source_sha256": "60819ccdc27c3318d020b25d7700bcf320bd2a7a76f7ce67212b6a13cb155d3f",
+      "portfolio_sha256": "076f911559403c5ab7073c1e75da81979fbec7d652155c38f3f3c6ff03915dff"
+    },
+    {
+      "source": "src/services/dailyTrainCatalog.js",
+      "destination": "src/services/dailyTrainCatalog.js",
+      "git_mode": "0o664",
+      "source_sha256": "441a6f451279183bfcd71c4260b1d00cf4b38e43f6e1da3351729ccfbf9230bd",
+      "portfolio_sha256": "40bc09c7fd81a0bfb1c3de37a18b02b80baf1da652775ba6b19065017f7e0067"
+    },
+    {
+      "source": "src/services/dailyTrainSchedules.json",
+      "destination": "src/services/dailyTrainSchedules.json",
+      "git_mode": "0o664",
+      "source_sha256": "ebc2b1b90a40329d9b8b08a79a8952c128527d2966a4735d525650b95488f587",
+      "portfolio_sha256": "36c36326f7fd2da4b98ab1ee750b38f9d5b3722237a081c01b69705b1ff0150f"
+    },
+    {
+      "source": "src/services/queueAdmission.js",
+      "destination": "src/services/queueAdmission.js",
+      "git_mode": "0o664",
+      "source_sha256": "d118e3bde495f31227ab807f93e184a6ffbf50943f7f7e9641b9f7f44d92d85c",
+      "portfolio_sha256": "9561a1409d97ed3ea26e854016cd25df6d5c5326ff676bfa6d73e9a08ad03824"
+    },
+    {
+      "source": "src/utils/consumerLogger.js",
+      "destination": "src/utils/consumerLogger.js",
+      "git_mode": "0o664",
+      "source_sha256": "bdc876e586cb52dc210a1862b0f67ca0f811e2508fde7592b427dc0989f7f26c",
+      "portfolio_sha256": "77fe4ff069fc1a4c6cb42c4ef8d963b62fa0e670e1af4e05c09e50acd2fdfeaa"
+    },
+    {
+      "source": "test/concurrency-booking.test.js",
+      "destination": "test/concurrency-booking.test.js",
+      "git_mode": "0o664",
+      "source_sha256": "4b7c3cb6e31d1796b204bded8fade0b74376846e4c0326abaffc11af86737608",
+      "portfolio_sha256": "4e2e0a1074290b5d16dfe4f563d2be5ba5e3530944fa911dead6e6e7e96e37f4"
+    },
+    {
+      "source": "test/concurrency-core.test.js",
+      "destination": "test/concurrency-core.test.js",
+      "git_mode": "0o664",
+      "source_sha256": "6efcb4dff37a979b8f25cb357948a2b69829ce7d86fd080902da4654ac88107c",
+      "portfolio_sha256": "5af0e9e731d5b806ef371db062d4d4bff9791c4ce200c5c2be48e048666da9d6"
+    },
+    {
+      "source": "test/daily-train-catalog.test.js",
+      "destination": "test/daily-train-catalog.test.js",
+      "git_mode": "0o664",
+      "source_sha256": "69967dcbbd66baa05f6f8c6e2506494d022648db8b295b4fc6b47f160a832602",
+      "portfolio_sha256": "42153b114ca0a84c3dd517feb3670a2366934b97131ea303ec1744f373871c38"
+    },
+    {
+      "source": "test/kafka-event-contract.test.js",
+      "destination": "test/kafka-event-contract.test.js",
+      "git_mode": "0o664",
+      "source_sha256": "71d19aecf0dc1e369a2c893cdc45ac6658167531bf17106650aa9860d308e232",
+      "portfolio_sha256": "56ed8249a4fd5e4e237455f6ad362e090eee85c14aece7f980eb0ba37e561ab6"
+    },
+    {
+      "source": "test/payment-status.test.js",
+      "destination": "test/payment-status.test.js",
+      "git_mode": "0o664",
+      "source_sha256": "ec11f555f3ac8712577048a02f61365f55b53bdf100a30e5e535798f0f5facb4",
+      "portfolio_sha256": "8e659e7657e68e75a473728e521c003f2b97443a6fde939a41210da0c7052c0f"
+    },
+    {
+      "source": "test/queue-admission.test.js",
+      "destination": "test/queue-admission.test.js",
+      "git_mode": "0o664",
+      "source_sha256": "15634f863a701abfd7cebb32b13f660b6f146a82b4be7d68ea08202ad04e2139",
+      "portfolio_sha256": "f9cb14a3a42b8d0f38d7e2058c3ad0df4870121fe6334668397adb4c7dd292fa"
+    },
+    {
+      "source": "ticketing-consumer-mock/.gitignore",
+      "destination": "ticketing-consumer-mock/.gitignore",
+      "git_mode": "0o664",
+      "source_sha256": "ff1b381b5f9f62e055e08dbe598e319c2417be5d9780d42e1c2da99843d42c6d",
+      "portfolio_sha256": "f735baee67fea65b81a02e5526237a2b48e92e9b706640ee5f4e12f9de84e071"
+    },
+    {
+      "source": "ticketing-consumer-mock/mock-notification/.dockerignore",
+      "destination": "ticketing-consumer-mock/mock-notification/.dockerignore",
+      "git_mode": "0o664",
+      "source_sha256": "c7a7be6d8a3acf97ca7d18b5dbdd81f945831d79efee7765b84b2b4e99c3c614",
+      "portfolio_sha256": "5e12493c0f55c77622cab54667d1a2603f6153e98880f43685c836ed29a8d8e6"
+    },
+    {
+      "source": "ticketing-consumer-mock/mock-notification/.env.example",
+      "destination": "ticketing-consumer-mock/mock-notification/.env.example",
+      "git_mode": "0o664",
+      "source_sha256": "79bc5a2c05813f6003923b0bd13c932cf5bf9d82b0d76c36882cb887dc95d92c",
+      "portfolio_sha256": "c9ff5c361c6ca5170e821fbbca62e895b03993c7ee3b2a9963744526f7bafdf7"
+    },
+    {
+      "source": "ticketing-consumer-mock/mock-notification/Dockerfile",
+      "destination": "ticketing-consumer-mock/mock-notification/Dockerfile",
+      "git_mode": "0o664",
+      "source_sha256": "6987c0176e2469598dd667e2f762a3b01903a6c3adc8f81ce65c8f2416cb3d47",
+      "portfolio_sha256": "8265a3115125ef043b054b397168b7e0d6337a522bbe0d6f4c0caa7b4293a19d"
+    },
+    {
+      "source": "ticketing-consumer-mock/mock-notification/README.md",
+      "destination": "ticketing-consumer-mock/mock-notification/README.md",
+      "git_mode": "0o664",
+      "source_sha256": "39142f7e2efdbfdf1216f680ef63c0aa5f5b00493a5baca3d984b687f751c864",
+      "portfolio_sha256": "c5d64bf91258f3b5e97dc02fa10e0076d8c752b0fd1a7dc5322f91da610dc095"
+    },
+    {
+      "source": "ticketing-consumer-mock/mock-notification/package-lock.json",
+      "destination": "ticketing-consumer-mock/mock-notification/package-lock.json",
+      "git_mode": "0o664",
+      "source_sha256": "84b1a5b9fc177ff42eec2e58814393c37e7af9b617729fcd2957fd743631b93c",
+      "portfolio_sha256": "dc3788dc21ff68178bf5dc2bc47da4a190afab1afb9db770f1fb4d0d9507b68e"
+    },
+    {
+      "source": "ticketing-consumer-mock/mock-notification/package.json",
+      "destination": "ticketing-consumer-mock/mock-notification/package.json",
+      "git_mode": "0o664",
+      "source_sha256": "fb346660be7191a99cb7e39257344acbe9c062ff56a05053a0cb49f86b206d70",
+      "portfolio_sha256": "b7788a1f1a28dc37ad13fb8fc8f9ab3dd90ce82a9f176f6bfb926a48d7cbd65d"
+    },
+    {
+      "source": "ticketing-consumer-mock/mock-notification/src/app.js",
+      "destination": "ticketing-consumer-mock/mock-notification/src/app.js",
+      "git_mode": "0o664",
+      "source_sha256": "491054240a2a8a3baf41df86f43ff96d666ed1be0c92c7621dc30ad72a3abf5e",
+      "portfolio_sha256": "3eee9fbe68ae082727bc29215e65c3d0a861bde1eb233b39fef0853d283cea39"
+    },
+    {
+      "source": "ticketing-consumer-mock/mock-notification/src/server.js",
+      "destination": "ticketing-consumer-mock/mock-notification/src/server.js",
+      "git_mode": "0o664",
+      "source_sha256": "ee6363e54b7bfa7bc31bb12ebbed9cc547c26ec19ef235ab7aa0dc4126204f4d",
+      "portfolio_sha256": "5ef556183328a1ad17c6dae6d1c6b10e62851a5d953450653e5d5e704ee74aac"
+    },
+    {
+      "source": "ticketing-consumer-mock/mock-notification/test/app.test.js",
+      "destination": "ticketing-consumer-mock/mock-notification/test/app.test.js",
+      "git_mode": "0o664",
+      "source_sha256": "9f9a5aade027a08e3798fa3f91e873dfa4e335b876abcb90b70970f82a18cfe0",
+      "portfolio_sha256": "847a9049c1892a7c7ca1dddc154e3139a3ccb5ce4b3faee379b669049eeb6451"
+    },
+    {
+      "source": "ticketing-consumer-mock/mock-payment/.dockerignore",
+      "destination": "ticketing-consumer-mock/mock-payment/.dockerignore",
+      "git_mode": "0o664",
+      "source_sha256": "f342c145d6ec14abe95f5b6104d1067cc16405b33a97a34ac3aac4993c8bd112",
+      "portfolio_sha256": "f6e80bc6494a0b8e76723707654ad5b63139abf9eda5592012243538b12d0262"
+    },
+    {
+      "source": "ticketing-consumer-mock/mock-payment/.env.example",
+      "destination": "ticketing-consumer-mock/mock-payment/.env.example",
+      "git_mode": "0o664",
+      "source_sha256": "2f584a841d85f5bc004e772aaa3e66a6358636da4710b27df8ad4c1e24ba593e",
+      "portfolio_sha256": "8d3389866d382855adf8b0065f558d817cc43d75b68dfd852ee491c3e71c84be"
+    },
+    {
+      "source": "ticketing-consumer-mock/mock-payment/Dockerfile",
+      "destination": "ticketing-consumer-mock/mock-payment/Dockerfile",
+      "git_mode": "0o664",
+      "source_sha256": "76d779061ca7889b305217bafc6b2340755fa77d5fca3cdf99cc1cc4b3a7e65f",
+      "portfolio_sha256": "9d01f3c95d7a0eacc590c7b1935f84000ca2e2a5d459bc1dff7dbce326a1d6c6"
+    },
+    {
+      "source": "ticketing-consumer-mock/mock-payment/README.md",
+      "destination": "ticketing-consumer-mock/mock-payment/README.md",
+      "git_mode": "0o664",
+      "source_sha256": "57049b6906ab0a97e5f40db30c032ea5c46bddb4ad6dcc29123008f51db75266",
+      "portfolio_sha256": "34dda4b08a8842c367b0adb4f299b2be3d718c6527e3b9fd72e2eecb7a10dce4"
+    },
+    {
+      "source": "ticketing-consumer-mock/mock-payment/package-lock.json",
+      "destination": "ticketing-consumer-mock/mock-payment/package-lock.json",
+      "git_mode": "0o664",
+      "source_sha256": "03715d47acec4155d0137c59c7d40754b5880ab2ff838692141f4a1496303bcb",
+      "portfolio_sha256": "3287c120fe7f69a7ff58d56d37e6da41f05b6dd3d13789f06b2e43e17a7773b4"
+    },
+    {
+      "source": "ticketing-consumer-mock/mock-payment/package.json",
+      "destination": "ticketing-consumer-mock/mock-payment/package.json",
+      "git_mode": "0o664",
+      "source_sha256": "6dfc37428f0798bdbbf602705bd90eea55dad9434ebc023c228dcb6b5581aee2",
+      "portfolio_sha256": "839b9078855f996ad08f29f2fa043dc56dbb1ce7305ae2edf8cc764a03b80cca"
+    },
+    {
+      "source": "ticketing-consumer-mock/mock-payment/src/app.js",
+      "destination": "ticketing-consumer-mock/mock-payment/src/app.js",
+      "git_mode": "0o664",
+      "source_sha256": "d36aee6486cc411218f951dd8e94820b983492e6918a93ee308c31fa87bfed6a",
+      "portfolio_sha256": "e2244b08b4f55924853c762f83b1aa993e3efa471d4747178537c8ec673944ea"
+    },
+    {
+      "source": "ticketing-consumer-mock/mock-payment/src/server.js",
+      "destination": "ticketing-consumer-mock/mock-payment/src/server.js",
+      "git_mode": "0o664",
+      "source_sha256": "18aefe5f273257c5c8342f28811a8fd5255717b434dd48ddead268a3ee4983ba",
+      "portfolio_sha256": "caa02739a9b8fc1a752f346e63fef442d74897974e87a94c441d0f2d866b7fa8"
+    },
+    {
+      "source": "ticketing-consumer-mock/mock-payment/test/app.test.js",
+      "destination": "ticketing-consumer-mock/mock-payment/test/app.test.js",
+      "git_mode": "0o664",
+      "source_sha256": "f78529913099c49d0d661b19e98b691103576c1fde75f4b380f9bb216033e11a",
+      "portfolio_sha256": "d73120f889175ceb56993ada18cd3499f40d1058f847e65c1201f83e8ff816c9"
+    },
+    {
+      "source": "ticketing-consumer-mock/notification-consumer/.dockerignore",
+      "destination": "ticketing-consumer-mock/notification-consumer/.dockerignore",
+      "git_mode": "0o664",
+      "source_sha256": "c7a7be6d8a3acf97ca7d18b5dbdd81f945831d79efee7765b84b2b4e99c3c614",
+      "portfolio_sha256": "5e12493c0f55c77622cab54667d1a2603f6153e98880f43685c836ed29a8d8e6"
+    },
+    {
+      "source": "ticketing-consumer-mock/notification-consumer/.env.example",
+      "destination": "ticketing-consumer-mock/notification-consumer/.env.example",
+      "git_mode": "0o664",
+      "source_sha256": "5a6cd832a25d4c16db6e7fd46079458e4a59f332a3dde781ccfa24ee8036d4ac",
+      "portfolio_sha256": "3a7539da4228521f340779649f1455584802f9dc21f51b5c91799878a423c3f3"
+    },
+    {
+      "source": "ticketing-consumer-mock/notification-consumer/Dockerfile",
+      "destination": "ticketing-consumer-mock/notification-consumer/Dockerfile",
+      "git_mode": "0o664",
+      "source_sha256": "e216d0100e9c12efe70753352fc142691531c3aac36f5bf79c9841b95b2a496c",
+      "portfolio_sha256": "196b41e8e0ad76692894c4bde08b12d417d6b8decfffa0cd807f35358a6bcee3"
+    },
+    {
+      "source": "ticketing-consumer-mock/notification-consumer/README.md",
+      "destination": "ticketing-consumer-mock/notification-consumer/README.md",
+      "git_mode": "0o664",
+      "source_sha256": "3f0d0a8f002fc60411c52a168c7a197bc201001ef6922240dd2f1a8e68433c09",
+      "portfolio_sha256": "6545df85b99b1c630c768d5de5b7eca3390c6840eff56752218ea6804c14a970"
+    },
+    {
+      "source": "ticketing-consumer-mock/notification-consumer/package-lock.json",
+      "destination": "ticketing-consumer-mock/notification-consumer/package-lock.json",
+      "git_mode": "0o664",
+      "source_sha256": "ccd2a22822e28156f4d1dd3456ff65d5e5392a07a05fbc7811571bf0fa08aa72",
+      "portfolio_sha256": "2ddd9908e5ca5ac4405c53ac95842e532baa96dda30a0b0168ad678129ce1280"
+    },
+    {
+      "source": "ticketing-consumer-mock/notification-consumer/package.json",
+      "destination": "ticketing-consumer-mock/notification-consumer/package.json",
+      "git_mode": "0o664",
+      "source_sha256": "305b1e6cf90d5b5df5338d6e129de3a0e877b0e2f9ece1964b42b270e2218ccb",
+      "portfolio_sha256": "5780da776c3ec05f2606d385110d85fd8305d4562d11a4cae41b7a1a7eb2b0fe"
+    },
+    {
+      "source": "ticketing-consumer-mock/notification-consumer/src/config.js",
+      "destination": "ticketing-consumer-mock/notification-consumer/src/config.js",
+      "git_mode": "0o664",
+      "source_sha256": "4883c22d5a3db3e14b4c3ce11541013f954c19da2daa1752282984a91a949cc6",
+      "portfolio_sha256": "d6aa6cbe6243b0902ad7dae20f4d390005c51a5e4c19455f62abd81e53373013"
+    },
+    {
+      "source": "ticketing-consumer-mock/notification-consumer/src/handler.js",
+      "destination": "ticketing-consumer-mock/notification-consumer/src/handler.js",
+      "git_mode": "0o664",
+      "source_sha256": "67da7e2f53614c348939fd28d761c7298fcd535acd1c740e275763fa4bfa4fd2",
+      "portfolio_sha256": "ccb0d660e6631ffe9a0219c8f48941fdcfafeac5a62a977629d088781be1d575"
+    },
+    {
+      "source": "ticketing-consumer-mock/notification-consumer/src/health.js",
+      "destination": "ticketing-consumer-mock/notification-consumer/src/health.js",
+      "git_mode": "0o664",
+      "source_sha256": "2396a45009acdda08e14fc3fc190b3fcc2e69833a267108be28d0f3abadb576d",
+      "portfolio_sha256": "23a318cce414e1aebf45d7432a53673db33c61f4571e47a7e73d16204595f608"
+    },
+    {
+      "source": "ticketing-consumer-mock/notification-consumer/src/http-client.js",
+      "destination": "ticketing-consumer-mock/notification-consumer/src/http-client.js",
+      "git_mode": "0o664",
+      "source_sha256": "5a29fca6cae48c19e70027c17b9ad0a0c6e346bfa23004d67d0f668fe131b631",
+      "portfolio_sha256": "9833cb927d48dc96f0b8fee4597f482f173cd58f3ca1567ef9475e50addcb1a7"
+    },
+    {
+      "source": "ticketing-consumer-mock/notification-consumer/src/index.js",
+      "destination": "ticketing-consumer-mock/notification-consumer/src/index.js",
+      "git_mode": "0o664",
+      "source_sha256": "95ee060bdeeef321198f6bbcf5f509522a9d5a17bf27a85cc18b84c13c84f9ce",
+      "portfolio_sha256": "e7b3c144c1323482c6787c08193d50c95d4ddc49dae04389e1605c164bdbdd2a"
+    },
+    {
+      "source": "ticketing-consumer-mock/notification-consumer/test/handler.test.js",
+      "destination": "ticketing-consumer-mock/notification-consumer/test/handler.test.js",
+      "git_mode": "0o664",
+      "source_sha256": "df6f72c1f18c0f60348b25547edfc8b3e440027c4c08665f9e4ad6abb362194d",
+      "portfolio_sha256": "3930f28e48a8408d50d76b21537e7d93e8577e27a6ef8d485e886d23abaaace6"
+    }
+  ],
+  "omitted_backups": [
+    "playbooks/14-data-worker-join.yml.bak",
+    "src/public/ticketing.html.20260911",
+    "src/public/ticketing.html.20260914",
+    "src/public/ticketing.html.20260916"
+  ],
+  "layout_notes": [
+    "Source files copied from a pinned upstream commit, excluding four historical backup files.",
+    "Original README.md retained as UPSTREAM_README.md; original CLAUDE.md retained as UPSTREAM_NOTES.md for historical reference.",
+    "Original GitHub workflows retained as ci-reference/*.yml.txt, outside the executable workflow directory.",
+    "README.md and SOURCE.json added for portfolio navigation and provenance; unit tests run with dependencies installed locally."
+  ],
+  "checksum_note": "source_sha256 hashes the original source bytes; portfolio_sha256 hashes the Git index bytes after repository line-ending normalization."
+}

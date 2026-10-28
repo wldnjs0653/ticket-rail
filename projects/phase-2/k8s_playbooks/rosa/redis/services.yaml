@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-headless
+  namespace: data
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/part-of: ticketing-platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: redis
+  ports:
+  - name: redis
+    protocol: TCP
+    port: 6379
+    targetPort: redis
+  - name: sentinel
+    protocol: TCP
+    port: 26379
+    targetPort: sentinel
+  clusterIP: None
+  publishNotReadyAddresses: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-sentinel
+  namespace: data
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/part-of: ticketing-platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: redis
+  ports:
+  - name: sentinel
+    protocol: TCP
+    port: 26379
+    targetPort: sentinel

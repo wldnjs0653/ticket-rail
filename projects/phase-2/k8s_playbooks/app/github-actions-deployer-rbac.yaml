@@ -1,0 +1,75 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: github-actions-backend-smoke
+  namespace: app
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - services/proxy
+    resourceNames:
+      - backend
+      - http:backend:http
+    verbs:
+      - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: github-actions-backend-smoke
+  namespace: app
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: github-actions-backend-smoke
+subjects:
+  - kind: ServiceAccount
+    name: github-actions-deployer
+    namespace: app
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: github-actions-consumer-deployer
+  namespace: app
+rules:
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+    resourceNames:
+      - payment-consumer-v2
+      - notification-consumer-v2
+    verbs:
+      - get
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - keda.sh
+    resources:
+      - scaledobjects
+    resourceNames:
+      - payment-consumer-v2-kafka
+      - notification-consumer-v2-kafka
+    verbs:
+      - get
+      - patch
+      - update
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: github-actions-consumer-deployer
+  namespace: app
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: github-actions-consumer-deployer
+subjects:
+  - kind: ServiceAccount
+    name: github-actions-deployer
+    namespace: app

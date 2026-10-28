@@ -1,0 +1,8 @@
+---
+- name: Configure Data Worker local storage
+  hosts: data_workers
+  become: true
+  gather_facts: false
+
+  roles:
+    - role: storage

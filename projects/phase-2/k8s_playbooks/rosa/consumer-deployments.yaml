@@ -1,0 +1,393 @@
+{
+  "apiVersion": "apps/v1",
+  "kind": "Deployment",
+  "metadata": {
+    "labels": {
+      "app.kubernetes.io/name": "payment-consumer-v2",
+      "app.kubernetes.io/part-of": "ticketrail",
+      "ticketrail.io/consumer-role": "payment",
+      "ticketrail.io/location": "aws-rosa"
+    },
+    "name": "payment-consumer-v2",
+    "namespace": "ticketrail-hybrid"
+  },
+  "spec": {
+    "progressDeadlineSeconds": 600,
+    "replicas": 1,
+    "revisionHistoryLimit": 10,
+    "selector": {
+      "matchLabels": {
+        "app.kubernetes.io/name": "payment-consumer-v2"
+      }
+    },
+    "strategy": {
+      "rollingUpdate": {
+        "maxSurge": "25%",
+        "maxUnavailable": "25%"
+      },
+      "type": "RollingUpdate"
+    },
+    "template": {
+      "metadata": {
+        "annotations": {
+          "ticketrail.io/source-commit": "7f42db48a1bb66dd55d03eb58f3806148ddb9807"
+        },
+        "labels": {
+          "app.kubernetes.io/name": "payment-consumer-v2",
+          "app.kubernetes.io/part-of": "ticketrail",
+          "ticketrail.io/consumer-role": "payment",
+          "ticketrail.io/location": "aws-rosa"
+        }
+      },
+      "spec": {
+        "containers": [
+          {
+            "command": [
+              "node",
+              "src/consumers/main.js"
+            ],
+            "env": [
+              {
+                "name": "PORT",
+                "value": "8084"
+              },
+              {
+                "name": "KAFKA_BROKERS",
+                "value": "10.1.93.110:32089"
+              },
+              {
+                "name": "KAFKA_CLIENT_ID",
+                "value": "ticketing-rosa-consumer"
+              },
+              {
+                "name": "KAFKA_CONSUMER_GROUP",
+                "value": "ticketing-backend-consumer-v1"
+              },
+              {
+                "name": "PG_HOST",
+                "value": "10.1.93.110"
+              },
+              {
+                "name": "PG_PORT",
+                "value": "31666"
+              },
+              {
+                "name": "PG_DATABASE",
+                "value": "ticketing"
+              },
+              {
+                "name": "SKIP_KAFKA_CONSUMERS",
+                "value": "false"
+              },
+              {
+                "name": "PAYMENT_PARTITIONS_CONCURRENCY",
+                "value": "4"
+              },
+              {
+                "name": "NOTIFICATION_PARTITIONS_CONCURRENCY",
+                "value": "3"
+              },
+              {
+                "name": "CONSUMER_ROLE",
+                "value": "payment"
+              },
+              {
+                "name": "CONSUMER_SUCCESS_LOG_EVERY",
+                "value": "100"
+              },
+              {
+                "name": "PG_POOL_MAX",
+                "value": "3"
+              },
+              {
+                "name": "PG_POOL_IDLE_TIMEOUT_MS",
+                "value": "30000"
+              },
+              {
+                "name": "PG_POOL_CONNECTION_TIMEOUT_MS",
+                "value": "5000"
+              }
+            ],
+            "envFrom": [
+              {
+                "secretRef": {
+                  "name": "backend-secret"
+                }
+              }
+            ],
+            "image": "image-registry.openshift-image-registry.svc:5000/ticketrail-hybrid/ticketing-api@sha256:add5004de7627e58132961b795fd189060a421dfa6be99bcdc94fdc19e468511",
+            "imagePullPolicy": "Always",
+            "livenessProbe": {
+              "failureThreshold": 3,
+              "httpGet": {
+                "path": "/health/live",
+                "port": "http",
+                "scheme": "HTTP"
+              },
+              "initialDelaySeconds": 10,
+              "periodSeconds": 10,
+              "successThreshold": 1,
+              "timeoutSeconds": 2
+            },
+            "name": "payment-consumer-v2",
+            "ports": [
+              {
+                "containerPort": 8084,
+                "name": "http",
+                "protocol": "TCP"
+              }
+            ],
+            "readinessProbe": {
+              "failureThreshold": 12,
+              "httpGet": {
+                "path": "/health/ready",
+                "port": "http",
+                "scheme": "HTTP"
+              },
+              "initialDelaySeconds": 3,
+              "periodSeconds": 5,
+              "successThreshold": 1,
+              "timeoutSeconds": 2
+            },
+            "resources": {
+              "limits": {
+                "cpu": "1",
+                "memory": "512Mi"
+              },
+              "requests": {
+                "cpu": "200m",
+                "memory": "128Mi"
+              }
+            },
+            "terminationMessagePath": "/dev/termination-log",
+            "terminationMessagePolicy": "File"
+          }
+        ],
+        "dnsPolicy": "ClusterFirst",
+        "restartPolicy": "Always",
+        "schedulerName": "default-scheduler",
+        "securityContext": {},
+        "terminationGracePeriodSeconds": 60,
+        "topologySpreadConstraints": [
+          {
+            "labelSelector": {
+              "matchLabels": {
+                "app.kubernetes.io/name": "payment-consumer-v2"
+              }
+            },
+            "maxSkew": 1,
+            "topologyKey": "topology.kubernetes.io/zone",
+            "whenUnsatisfiable": "ScheduleAnyway"
+          },
+          {
+            "labelSelector": {
+              "matchLabels": {
+                "app.kubernetes.io/name": "payment-consumer-v2"
+              }
+            },
+            "maxSkew": 1,
+            "topologyKey": "kubernetes.io/hostname",
+            "whenUnsatisfiable": "ScheduleAnyway"
+          }
+        ]
+      }
+    }
+  }
+}
+---
+{
+  "apiVersion": "apps/v1",
+  "kind": "Deployment",
+  "metadata": {
+    "labels": {
+      "app.kubernetes.io/name": "notification-consumer-v2",
+      "app.kubernetes.io/part-of": "ticketrail",
+      "ticketrail.io/consumer-role": "notification",
+      "ticketrail.io/location": "aws-rosa"
+    },
+    "name": "notification-consumer-v2",
+    "namespace": "ticketrail-hybrid"
+  },
+  "spec": {
+    "progressDeadlineSeconds": 600,
+    "replicas": 1,
+    "revisionHistoryLimit": 10,
+    "selector": {
+      "matchLabels": {
+        "app.kubernetes.io/name": "notification-consumer-v2"
+      }
+    },
+    "strategy": {
+      "rollingUpdate": {
+        "maxSurge": "25%",
+        "maxUnavailable": "25%"
+      },
+      "type": "RollingUpdate"
+    },
+    "template": {
+      "metadata": {
+        "annotations": {
+          "ticketrail.io/source-commit": "7f42db48a1bb66dd55d03eb58f3806148ddb9807"
+        },
+        "labels": {
+          "app.kubernetes.io/name": "notification-consumer-v2",
+          "app.kubernetes.io/part-of": "ticketrail",
+          "ticketrail.io/consumer-role": "notification",
+          "ticketrail.io/location": "aws-rosa"
+        }
+      },
+      "spec": {
+        "containers": [
+          {
+            "command": [
+              "node",
+              "src/consumers/main.js"
+            ],
+            "env": [
+              {
+                "name": "PORT",
+                "value": "8084"
+              },
+              {
+                "name": "KAFKA_BROKERS",
+                "value": "10.1.93.110:32089"
+              },
+              {
+                "name": "KAFKA_CLIENT_ID",
+                "value": "ticketing-rosa-consumer"
+              },
+              {
+                "name": "KAFKA_CONSUMER_GROUP",
+                "value": "ticketing-backend-consumer-v1"
+              },
+              {
+                "name": "PG_HOST",
+                "value": "10.1.93.110"
+              },
+              {
+                "name": "PG_PORT",
+                "value": "31666"
+              },
+              {
+                "name": "PG_DATABASE",
+                "value": "ticketing"
+              },
+              {
+                "name": "SKIP_KAFKA_CONSUMERS",
+                "value": "false"
+              },
+              {
+                "name": "PAYMENT_PARTITIONS_CONCURRENCY",
+                "value": "4"
+              },
+              {
+                "name": "NOTIFICATION_PARTITIONS_CONCURRENCY",
+                "value": "3"
+              },
+              {
+                "name": "CONSUMER_ROLE",
+                "value": "notification"
+              },
+              {
+                "name": "CONSUMER_SUCCESS_LOG_EVERY",
+                "value": "100"
+              },
+              {
+                "name": "PG_POOL_MAX",
+                "value": "3"
+              },
+              {
+                "name": "PG_POOL_IDLE_TIMEOUT_MS",
+                "value": "30000"
+              },
+              {
+                "name": "PG_POOL_CONNECTION_TIMEOUT_MS",
+                "value": "5000"
+              }
+            ],
+            "envFrom": [
+              {
+                "secretRef": {
+                  "name": "backend-secret"
+                }
+              }
+            ],
+            "image": "image-registry.openshift-image-registry.svc:5000/ticketrail-hybrid/ticketing-api@sha256:add5004de7627e58132961b795fd189060a421dfa6be99bcdc94fdc19e468511",
+            "imagePullPolicy": "Always",
+            "livenessProbe": {
+              "failureThreshold": 3,
+              "httpGet": {
+                "path": "/health/live",
+                "port": "http",
+                "scheme": "HTTP"
+              },
+              "initialDelaySeconds": 10,
+              "periodSeconds": 10,
+              "successThreshold": 1,
+              "timeoutSeconds": 2
+            },
+            "name": "payment-consumer-v2",
+            "ports": [
+              {
+                "containerPort": 8084,
+                "name": "http",
+                "protocol": "TCP"
+              }
+            ],
+            "readinessProbe": {
+              "failureThreshold": 12,
+              "httpGet": {
+                "path": "/health/ready",
+                "port": "http",
+                "scheme": "HTTP"
+              },
+              "initialDelaySeconds": 3,
+              "periodSeconds": 5,
+              "successThreshold": 1,
+              "timeoutSeconds": 2
+            },
+            "resources": {
+              "limits": {
+                "cpu": "1",
+                "memory": "512Mi"
+              },
+              "requests": {
+                "cpu": "200m",
+                "memory": "128Mi"
+              }
+            },
+            "terminationMessagePath": "/dev/termination-log",
+            "terminationMessagePolicy": "File"
+          }
+        ],
+        "dnsPolicy": "ClusterFirst",
+        "restartPolicy": "Always",
+        "schedulerName": "default-scheduler",
+        "securityContext": {},
+        "terminationGracePeriodSeconds": 60,
+        "topologySpreadConstraints": [
+          {
+            "labelSelector": {
+              "matchLabels": {
+                "app.kubernetes.io/name": "notification-consumer-v2"
+              }
+            },
+            "maxSkew": 1,
+            "topologyKey": "topology.kubernetes.io/zone",
+            "whenUnsatisfiable": "ScheduleAnyway"
+          },
+          {
+            "labelSelector": {
+              "matchLabels": {
+                "app.kubernetes.io/name": "notification-consumer-v2"
+              }
+            },
+            "maxSkew": 1,
+            "topologyKey": "kubernetes.io/hostname",
+            "whenUnsatisfiable": "ScheduleAnyway"
+          }
+        ]
+      }
+    }
+  }
+}

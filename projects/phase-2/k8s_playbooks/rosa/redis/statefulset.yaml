@@ -1,0 +1,260 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: data
+  labels: &id001
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/part-of: ticketing-platform
+spec:
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  podManagementPolicy: OrderedReady
+  replicas: 3
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+  serviceName: redis-headless
+  template:
+    metadata:
+      labels: *id001
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: redis
+      containers:
+      - command:
+        - redis-server
+        - /runtime/redis.conf
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: redis-auth
+        image: docker.io/library/redis:8.2.1-alpine
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          exec:
+            command:
+            - sh
+            - -ec
+            - REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping | grep -q PONG
+          failureThreshold: 6
+          initialDelaySeconds: 20
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 3
+        name: redis
+        ports:
+        - containerPort: 6379
+          name: redis
+          protocol: TCP
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - -ec
+            - REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping | grep -q PONG
+          failureThreshold: 12
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          successThreshold: 1
+          timeoutSeconds: 3
+        resources:
+          limits:
+            cpu: 500m
+            memory: 1Gi
+          requests:
+            cpu: 250m
+            memory: 512Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /data
+          name: redis-data
+        - mountPath: /runtime
+          name: redis-runtime
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+      - command:
+        - redis-server
+        - /data/sentinel/sentinel.conf
+        - --sentinel
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: redis-auth
+        image: docker.io/library/redis:8.2.1-alpine
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          exec:
+            command:
+            - sh
+            - -ec
+            - REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli -p 26379 ping | grep -q PONG
+          failureThreshold: 6
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 3
+        name: sentinel
+        ports:
+        - containerPort: 26379
+          name: sentinel
+          protocol: TCP
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - -ec
+            - REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli -p 26379 ping | grep -q PONG
+          failureThreshold: 12
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          successThreshold: 1
+          timeoutSeconds: 3
+        resources:
+          limits:
+            cpu: 200m
+            memory: 256Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /data
+          name: redis-data
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+      - env:
+        - name: REDIS_ADDR
+          value: redis://127.0.0.1:6379
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: redis-auth
+        image: docker.io/oliver006/redis_exporter:v1.90.0-alpine
+        imagePullPolicy: IfNotPresent
+        name: redis-exporter
+        ports:
+        - containerPort: 9121
+          name: metrics
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /health
+            port: metrics
+            scheme: HTTP
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        resources:
+          limits:
+            cpu: 100m
+            memory: 128Mi
+          requests:
+            cpu: 25m
+            memory: 32Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+      dnsPolicy: ClusterFirst
+      initContainers:
+      - command:
+        - sh
+        - /bootstrap/prepare.sh
+        env:
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: redis-auth
+        - name: REDIS_REPLICAS
+          value: '3'
+        - name: REDIS_MASTER_NAME
+          value: ticketing-master
+        - name: REDIS_SENTINEL_QUORUM
+          value: '2'
+        - name: REDIS_SENTINEL_DOWN_AFTER_MS
+          value: '5000'
+        - name: REDIS_SENTINEL_FAILOVER_TIMEOUT_MS
+          value: '60000'
+        image: docker.io/library/redis:8.2.1-alpine
+        imagePullPolicy: IfNotPresent
+        name: prepare-redis-ha
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /bootstrap
+          name: redis-bootstrap
+          readOnly: true
+        - mountPath: /runtime
+          name: redis-runtime
+        - mountPath: /data
+          name: redis-data
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - configMap:
+          defaultMode: 365
+          name: redis-ha-config
+        name: redis-bootstrap
+      - emptyDir: {}
+        name: redis-runtime
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+  updateStrategy:
+    rollingUpdate:
+      partition: 0
+    type: RollingUpdate
+  volumeClaimTemplates:
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      name: redis-data
+      labels: *id001
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 5Gi
+      volumeMode: Filesystem

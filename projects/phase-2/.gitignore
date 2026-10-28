@@ -1,0 +1,8 @@
+# Node.js
+.env
+.env.bak
+node_modules/
+
+# Kubernetes secrets
+k8s_playbooks/app/secret.yaml
+k8s_playbooks/tls/

@@ -1,0 +1,122 @@
+---
+- name: Configure Kubernetes API Load Balancer
+  hosts: lb
+  become: true
+  gather_facts: true
+
+  tasks:
+
+    - name: Install HAProxy
+      ansible.builtin.dnf:
+        name: haproxy
+        state: present
+
+    - name: Configure HAProxy
+      ansible.builtin.copy:
+        dest: /etc/haproxy/haproxy.cfg
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          global
+              log /dev/log local0
+              log /dev/log local1 notice
+              daemon
+
+          defaults
+              log global
+              mode tcp
+              option tcplog
+              timeout connect 5s
+              timeout client 30s
+              timeout server 30s
+
+          frontend kubernetes-api
+              bind *:6443
+              mode tcp
+              default_backend kubernetes-control-plane
+
+          backend kubernetes-control-plane
+              mode tcp
+              balance roundrobin
+              option tcp-check
+
+              server master1 10.1.93.62:6443 check
+              server master2 10.1.93.63:6443 check
+              server master3 10.1.93.64:6443 check
+
+    - name: Validate HAProxy configuration
+      ansible.builtin.command:
+        cmd: haproxy -c -f /etc/haproxy/haproxy.cfg
+      changed_when: false
+
+    - name: Enable and start HAProxy
+      ansible.builtin.systemd:
+        name: haproxy
+        enabled: true
+        state: started
+
+    - name: Install SELinux management tools
+      ansible.builtin.dnf:
+        name: policycoreutils-python-utils
+        state: present
+
+    - name: Allow HAProxy to bind Kubernetes API port
+      ansible.builtin.shell:
+        cmd: |
+          semanage port -a -t http_port_t -p tcp 6443 2>/dev/null || \
+          semanage port -m -t http_port_t -p tcp 6443
+        executable: /bin/bash
+
+    - name: Install Keepalived
+      ansible.builtin.dnf:
+        name: keepalived
+        state: present
+
+    - name: Configure Keepalived
+      ansible.builtin.copy:
+        dest: /etc/keepalived/keepalived.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          global_defs {
+              router_id {{ 'LB1' if inventory_hostname == 'lb1' else 'LB2' }}
+          }
+
+          vrrp_instance VI_1 {
+              state {{ 'MASTER' if inventory_hostname == 'lb1' else 'BACKUP' }}
+              interface ens160
+              virtual_router_id 51
+              priority {{ 150 if inventory_hostname == 'lb1' else 100 }}
+              advert_int 1
+
+              authentication {
+                  auth_type PASS
+                  auth_pass TicketingVIP
+              }
+
+              virtual_ipaddress {
+                  10.1.93.65/24
+              }
+          }
+
+    - name: Enable and start Keepalived
+      ansible.builtin.systemd:
+        name: keepalived
+        enabled: true
+        state: started
+
+    - name: Allow VRRP traffic through firewalld
+      ansible.posix.firewalld:
+        rich_rule: 'rule protocol value="vrrp" accept'
+        permanent: true
+        immediate: true
+        state: enabled
+
+    - name: Allow Kubernetes API port through firewalld
+      ansible.posix.firewalld:
+        port: 6443/tcp
+        permanent: true
+        immediate: true
+        state: enabled

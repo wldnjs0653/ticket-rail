@@ -1,0 +1,3082 @@
+<!DOCTYPE html>
+<!-- @author gyustar -->
+<!-- @date 2026-10-01 (Redis 대기실 사용자 화면 추가) -->
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TICKET RAIL | 승차권 예매</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --navy: #0b2545;
+      --navy-deep: #06182f;
+      --navy-line: #23446f;
+      --navy-mist: #8fa7c7;
+      --ink: #14202f;
+      --ink-soft: #55606f;
+      --ink-faint: #949eab;
+      --line: #e2e6ec;
+      --line-strong: #c9d0d9;
+      --bg: #f1f4f8;
+      --card: #ffffff;
+      --amber: #f0a500;
+      --amber-ink: #33240a;
+      --blue: #1b4dc4;
+      --blue-soft: #edf2fd;
+      --green: #12762f;
+      --green-soft: #e8f5ec;
+      --warn: #a8500a;
+      --warn-soft: #fdf2e5;
+      --red: #b52222;
+      --red-soft: #fcebea;
+      --gold: #8f5a08;
+      --gold-soft: #fcf4dc;
+    }
+    body {
+      font-family: -apple-system, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+      background: var(--bg); color: var(--ink); min-height: 100vh;
+      font-feature-settings: 'tnum' 1;
+      -webkit-font-smoothing: antialiased;
+    }
+    :focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; animation: none !important; }
+    }
+
+    /* ── 전광판 : 타이틀 + 검색 ──────────────────────────────── */
+    .hero {
+      background: var(--navy); color: #fff; padding: 0 16px 34px;
+      position: relative; overflow: hidden;
+    }
+    .hero-train {
+      position: absolute; right: -40px; bottom: -30px;
+      width: 420px; opacity: 0.055; pointer-events: none;
+      fill: #ffffff;
+    }
+    .hero-inner { max-width: 900px; margin: 0 auto; position: relative; }
+    .hero-top { display: flex; justify-content: space-between; align-items: center; padding: 18px 0 24px; }
+    .brand { display: flex; align-items: baseline; gap: 10px; }
+    .brand .mark { font-size: 17px; font-weight: 800; letter-spacing: 4px; color: #fff; }
+    .brand .sub { font-size: 11px; color: var(--navy-mist); letter-spacing: 1px; }
+    .health { display: flex; gap: 7px; align-items: center; }
+    .health-dot { width: 7px; height: 7px; border-radius: 50%; }
+    .health-dot.ok { background: #4ade80; box-shadow: 0 0 0 3px rgba(74,222,128,0.18); }
+    .health-dot.fail { background: #f87171; box-shadow: 0 0 0 3px rgba(248,113,113,0.18); }
+    .health-dot.unknown { background: #7f93b3; }
+    .health-label { font-size: 12px; color: var(--navy-mist); letter-spacing: 0.5px; }
+
+    .board { padding: 8px 0 0; }
+    .station-row { display: flex; align-items: flex-end; justify-content: center; gap: 14px; }
+    .station-input { flex: 0 1 210px; min-width: 0; }
+    .station-input label {
+      display: block; text-align: center; font-size: 11px; font-weight: 600;
+      color: var(--navy-mist); letter-spacing: 3px; margin-bottom: 2px;
+    }
+    .station-input select {
+      width: 100%; border: none; background: transparent; outline: none;
+      color: #fff; font-size: 42px; font-weight: 800; letter-spacing: -0.5px;
+      padding: 0 0 10px; cursor: pointer;
+      appearance: none; -webkit-appearance: none;
+      text-align: center; text-align-last: center;
+      border-bottom: 2px solid var(--navy-line); transition: border-color 0.18s;
+    }
+    .station-input select:hover,
+    .station-input select:focus { border-bottom-color: var(--amber); }
+    .station-input select option { color: var(--ink); background: #fff; font-size: 16px; text-align: left; }
+    .swap-btn {
+      width: 40px; height: 40px; border-radius: 50%;
+      border: 1px solid var(--navy-line); background: transparent;
+      cursor: pointer; font-size: 16px; color: var(--navy-mist);
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 14px; transition: all 0.2s; flex-shrink: 0;
+    }
+    .swap-btn:hover { border-color: var(--amber); color: var(--amber); transform: rotate(180deg); }
+
+    /* 선로 — 검색 영역과 조회 조건 사이를 잇는 구조선 */
+    .rail { display: flex; align-items: center; gap: 0; margin: 20px 0 22px; }
+    .rail-line { flex: 1; height: 1px; background: var(--navy-line); }
+    .rail-ties {
+      flex: 0 0 auto; height: 7px; width: 120px;
+      background-image: repeating-linear-gradient(90deg, var(--navy-line) 0 1px, transparent 1px 9px);
+    }
+
+    .board-controls { display: flex; justify-content: center; gap: 10px; }
+    .board-controls input, .board-controls select {
+      padding: 13px 14px; border: 1px solid var(--navy-line); border-radius: 8px;
+      font-size: 14px; font-weight: 600; color: #fff;
+      background: rgba(255,255,255,0.04); outline: none; color-scheme: dark;
+      transition: border-color 0.18s;
+    }
+    .board-controls input { flex: 0 0 190px; }
+    .board-controls input:focus, .board-controls select:focus { border-color: var(--amber); }
+    .search-btn {
+      flex: 0 0 150px; padding: 13px; background: var(--amber); color: var(--amber-ink);
+      border: none; border-radius: 8px; font-size: 15px; font-weight: 800; letter-spacing: 1px;
+      cursor: pointer; transition: filter 0.15s;
+    }
+    .search-btn:hover { filter: brightness(1.08); }
+
+    /* ── 본문 2단 ────────────────────────────────────────────── */
+    .layout { display: flex; gap: 22px; max-width: 900px; margin: 0 auto; padding: 24px 16px; align-items: flex-start; }
+    .side { width: 284px; flex-shrink: 0; position: sticky; top: 16px; }
+    .container { flex: 1; min-width: 0; }
+    @media (max-width: 840px) {
+      .layout { flex-direction: column; align-items: stretch; }
+      .side { width: 100%; position: static; }
+      .station-input select { font-size: 30px; }
+      .station-input { flex: 1 1 0; }
+      .search-btn { flex: 1; }
+      .hero-train { width: 260px; opacity: 0.04; }
+    }
+
+    /* ── 안내 배너 ───────────────────────────────────────────── */
+    .banner {
+      display: none; align-items: flex-start; gap: 10px;
+      border-radius: 8px; padding: 12px 14px; margin-bottom: 14px;
+      font-size: 13px; font-weight: 600; line-height: 1.55;
+      border-left: 3px solid transparent;
+    }
+    .banner.show { display: flex; }
+    .banner.info    { background: var(--blue-soft);  color: #14307d;      border-left-color: var(--blue); }
+    .banner.success { background: var(--green-soft); color: var(--green); border-left-color: var(--green); }
+    .banner.warn    { background: var(--warn-soft);  color: var(--warn);  border-left-color: var(--amber); }
+    .banner.error   { background: var(--red-soft);   color: var(--red);   border-left-color: var(--red); }
+    .banner .b-close { margin-left: auto; background: none; border: none; cursor: pointer; color: inherit; font-size: 14px; opacity: 0.55; }
+    .banner .b-close:hover { opacity: 1; }
+
+    /* ── 열차 목록 ───────────────────────────────────────────── */
+    .search-summary {
+      font-size: 12px; color: var(--ink-soft); margin: 0 2px 12px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .search-summary b { font-weight: 700; color: var(--ink); }
+    .train-list {
+      background: var(--card); border: 1px solid var(--line);
+      border-radius: 12px; overflow: hidden; margin-bottom: 16px;
+    }
+    .train-item {
+      padding: 18px 20px; cursor: pointer;
+      border-bottom: 1px solid var(--line);
+      border-left: 3px solid transparent;
+      transition: background 0.12s, border-left-color 0.12s;
+    }
+    .train-item:last-child { border-bottom: none; }
+    .train-item:hover { background: #f7fafd; }
+    .train-item.selected { background: var(--blue-soft); border-left-color: var(--navy); }
+    .train-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .train-name { font-size: 14px; font-weight: 800; color: var(--navy); letter-spacing: -0.2px; }
+    .train-badge { font-size: 10px; padding: 4px 9px; border-radius: 4px; font-weight: 800; letter-spacing: 0.5px; color: #fff; }
+    .train-badge.ktx { background: #1b4dc4; }
+    .train-badge.itx { background: #0f8a4a; }
+    .train-badge.mugunghwa { background: #c2185b; }
+    .train-badge.etc { background: #6b7684; }
+
+    .train-time-row { display: flex; align-items: center; gap: 14px; }
+    .train-time { text-align: center; min-width: 62px; }
+    .train-time .time { font-size: 26px; font-weight: 800; letter-spacing: -1px; line-height: 1; }
+    .train-time .station { font-size: 11px; color: var(--ink-faint); margin-top: 4px; }
+    .train-duration { flex: 1; position: relative; }
+    .train-duration .track {
+      height: 6px; position: relative;
+      background-image: repeating-linear-gradient(90deg, var(--line-strong) 0 1px, transparent 1px 7px);
+    }
+    .train-duration .track::before,
+    .train-duration .track::after {
+      content: ''; position: absolute; top: 1px; width: 5px; height: 5px;
+      border-radius: 50%; background: var(--navy);
+    }
+    .train-duration .track::before { left: 0; }
+    .train-duration .track::after { right: 0; }
+    .train-duration .dur-text { margin-top: 8px; text-align: center; }
+    .train-duration .dur-text span {
+      display: inline-block; font-size: 11px; color: var(--ink-soft);
+      background: #f0f2f5; border-radius: 4px; padding: 3px 9px;
+    }
+
+    .train-bottom {
+      display: flex; justify-content: space-between; align-items: flex-end;
+      margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line);
+    }
+    .fare { display: flex; flex-direction: column; gap: 5px; }
+    .fare-row { display: flex; align-items: baseline; gap: 10px; font-size: 13px; }
+    .fare-row .cls { color: var(--ink-soft); min-width: 30px; }
+    .fare-row .amt { font-weight: 800; font-size: 16px; letter-spacing: -0.3px; }
+    .fare-row .amt.none { font-weight: 600; font-size: 13px; color: var(--ink-faint); }
+    .fare-row.first .amt { color: var(--gold); }
+    .seat-remain { font-size: 12px; font-weight: 700; }
+    .seat-remain.wide { color: var(--green); }
+    .seat-remain.mid  { color: var(--blue); }
+    .seat-remain.few  { color: var(--red); }
+    .seat-remain small { color: var(--ink-faint); font-weight: 400; }
+
+    /* ── 카드 공통 ───────────────────────────────────────────── */
+    .seat-select-card, .result-card, .panel {
+      background: var(--card); border: 1px solid var(--line);
+      border-radius: 12px; padding: 22px; margin-bottom: 16px;
+    }
+
+    /* ── 좌석 선택 ───────────────────────────────────────────── */
+    .seat-select-card { display: none; }
+    .seat-select-card h3 { font-size: 15px; font-weight: 800; margin-bottom: 4px; letter-spacing: -0.2px; }
+    .seat-hint { font-size: 12px; color: var(--ink-faint); margin-bottom: 16px; }
+    .seat-legend { display: flex; gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }
+    .seat-legend .lg { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-soft); }
+    .seat-legend .sq { width: 13px; height: 13px; border-radius: 3px; border: 1px solid transparent; }
+    .sq.avail { background: #eef0f3; border-color: var(--line-strong); }
+    .sq.prem  { background: var(--gold-soft); border-color: #ddc172; }
+    .sq.sel   { background: var(--navy); }
+    .sq.taken { background: #f7f8fa; border-color: var(--line); }
+
+    /* 객차 외곽 — 좌석 배열을 차량 안에 넣은 것처럼 */
+    .car-shell {
+      border: 1px solid var(--line-strong); border-radius: 14px;
+      padding: 14px 12px; margin-bottom: 14px; background: #fbfcfd;
+    }
+    .seat-layout { display: flex; flex-direction: column; gap: 5px; }
+    .tseat {
+      height: 34px; border-radius: 5px; border: 1px solid var(--line-strong);
+      cursor: pointer; font-size: 11px; font-weight: 700; transition: all 0.12s;
+      background: #eef0f3; color: var(--ink-soft);
+    }
+    .tseat.avail:hover { background: var(--navy); border-color: var(--navy); color: #fff; }
+    .tseat.prem { background: var(--gold-soft); border-color: #ddc172; color: var(--gold); }
+    .tseat.prem:hover { background: var(--gold); border-color: var(--gold); color: #fff; }
+    .tseat.sel { background: var(--navy); border-color: var(--navy); color: #fff; }
+    .tseat.taken { background: #f7f8fa; border-color: var(--line); color: var(--line-strong); cursor: not-allowed; }
+
+    .sel-seat-info {
+      font-size: 13px; font-weight: 700; color: #14307d;
+      background: var(--blue-soft); border-radius: 6px; padding: 11px 13px; margin-bottom: 12px;
+      display: none;
+    }
+    .sel-seat-info.show { display: block; }
+
+    .action-bar { display: flex; gap: 8px; }
+    .action-bar .btn {
+      flex: 1; padding: 13px; border: none; border-radius: 8px;
+      font-size: 14px; font-weight: 700; cursor: pointer; transition: filter 0.15s;
+    }
+    .action-bar .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .action-bar .btn:hover:not(:disabled) { filter: brightness(0.94); }
+    .btn-hold { background: var(--amber); color: var(--amber-ink); }
+    .btn-book { background: var(--green); color: #fff; }
+    .btn-cancel { background: #eef0f3; color: var(--ink-soft); }
+
+    /* ── 결과 티켓 ───────────────────────────────────────────── */
+    .result-card { display: none; padding: 0; border: none; background: none; }
+    .ticket {
+      background: #fff; border: 1px solid var(--line-strong);
+      border-radius: 10px; overflow: hidden; margin-bottom: 14px;
+    }
+    .ticket-top { padding: 20px 22px 18px; }
+    .ticket-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+    .ticket-header .type { font-size: 14px; font-weight: 800; color: var(--navy); }
+    .ticket-status { padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: 700; }
+    .ticket-status.pending { background: var(--warn-soft); color: var(--warn); }
+    .ticket-status.confirmed { background: var(--green-soft); color: var(--green); }
+    .ticket-status.failed { background: var(--red-soft); color: var(--red); }
+    .ticket-route { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+    .ticket-route .st { text-align: center; min-width: 66px; }
+    .ticket-route .st .city { font-size: 24px; font-weight: 800; letter-spacing: -0.5px; }
+    .ticket-route .st .tm { font-size: 13px; color: var(--ink-soft); margin-top: 4px; }
+    .ticket-route .mid { flex: 1; }
+    .ticket-route .mid .track {
+      height: 6px; position: relative;
+      background-image: repeating-linear-gradient(90deg, var(--line-strong) 0 1px, transparent 1px 7px);
+    }
+    .ticket-details { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    .ticket-details div { text-align: center; }
+    .ticket-details label { font-size: 11px; color: var(--ink-faint); }
+    .ticket-details p { font-size: 14px; font-weight: 700; margin-top: 4px; }
+
+    /* 절취선 — 표를 뜯는 자리 */
+    .perf { position: relative; height: 18px; background: #fff; }
+    .perf::before, .perf::after {
+      content: ''; position: absolute; top: 50%; transform: translateY(-50%);
+      width: 18px; height: 18px; border-radius: 50%; background: var(--bg);
+      border: 1px solid var(--line-strong);
+    }
+    .perf::before { left: -10px; }
+    .perf::after { right: -10px; }
+    .perf .dash {
+      position: absolute; left: 16px; right: 16px; top: 50%;
+      border-top: 1px dashed var(--line-strong);
+    }
+    .ticket-foot { padding: 4px 22px 20px; text-align: center; }
+    .ticket-foot .bk-label { font-size: 11px; color: var(--ink-faint); }
+    .ticket-foot .bk-id { font-size: 22px; font-weight: 800; letter-spacing: 3px; color: var(--navy); margin-top: 4px; }
+    .ticket-foot .pay-line { font-size: 12px; font-weight: 600; color: var(--ink-soft); margin-top: 10px; }
+
+    /* ── 좌측 : 노선도 ───────────────────────────────────────── */
+    .panel { padding: 24px; }
+    .panel h4 { font-size: 12px; font-weight: 700; color: var(--ink-soft); margin-bottom: 22px; letter-spacing: 2px; }
+    .flow-steps { display: flex; flex-direction: column; }
+    .step { display: flex; gap: 18px; padding: 15px 0; position: relative; }
+    .step .num {
+      width: 18px; height: 18px; border-radius: 50%;
+      background: #fff; border: 3px solid var(--line-strong);
+      flex-shrink: 0; margin-top: 3px; transition: all 0.2s; font-size: 0;
+    }
+    .step .body { flex: 1; min-width: 0; }
+    .step .label { font-size: 16px; font-weight: 700; color: var(--ink-faint); transition: color 0.2s; }
+    .step .api { font-size: 12px; color: var(--line-strong); font-family: ui-monospace, 'Cascadia Code', monospace; margin-top: 5px; word-break: break-all; line-height: 1.6; }
+    .step:not(:last-child)::before {
+      content: ''; position: absolute; left: 7.5px; top: 36px; width: 3px;
+      height: calc(100% - 24px); background: var(--line); border-radius: 2px;
+    }
+    .step.active .num { border-color: var(--navy); background: var(--amber); box-shadow: 0 0 0 4px rgba(240,165,0,0.22); }
+    .step.active .label { color: var(--navy); }
+    .step.active .api { color: var(--ink-soft); }
+    .step.done .num { border-color: var(--navy); background: var(--navy); }
+    .step.done .label { color: var(--ink); }
+    .step.done .api { color: var(--ink-faint); }
+    .step.done::before { background: var(--navy); }
+
+
+    .no-route {
+      background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+      padding: 44px 20px; text-align: center; color: var(--ink-soft); font-size: 14px;
+      margin-bottom: 16px;
+    }
+
+    /*
+     * [추가] 결제·예매 진행 화면 스타일
+     * 수정자: wldnjs0653
+     * 수정일: 2026-09-16
+     * 설명: 결제수단 선택 모달, Kafka 비동기 처리 대기 화면,
+     *       예매 완료 모달과 우측 상단 완료 알림의 스타일을 정의한다.
+     */
+    /* ── 사용자 결제 팝업 ───────────────────────────────────── */
+    .modal-backdrop {
+      position: fixed; inset: 0; z-index: 1000; display: none;
+      align-items: center; justify-content: center; padding: 20px;
+      background: rgba(4, 16, 34, 0.66); backdrop-filter: blur(3px);
+    }
+    .modal-backdrop.show { display: flex; animation: fadeIn 0.18s ease-out; }
+    .payment-dialog {
+      width: min(520px, 100%); max-height: calc(100vh - 40px); overflow-y: auto;
+      background: #fff; border-radius: 18px; box-shadow: 0 24px 70px rgba(3,18,40,0.3);
+      animation: riseIn 0.22s ease-out;
+    }
+    .payment-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 22px 24px 18px; border-bottom: 1px solid var(--line);
+    }
+    .payment-head h2 { font-size: 20px; color: var(--navy); }
+    .payment-head p { margin-top: 5px; font-size: 12px; color: var(--ink-soft); }
+    .modal-close {
+      border: 0; background: #f2f4f7; color: var(--ink-soft); width: 34px; height: 34px;
+      border-radius: 50%; cursor: pointer; font-size: 16px;
+    }
+    .payment-body { padding: 22px 24px 24px; }
+    .payment-summary {
+      display: grid; grid-template-columns: 1fr auto; gap: 9px 18px;
+      padding: 16px 18px; border-radius: 12px; background: #f5f7fa; margin-bottom: 22px;
+    }
+    .payment-summary .route { font-size: 15px; font-weight: 800; color: var(--navy); }
+    .payment-summary .seat { font-size: 12px; color: var(--ink-soft); }
+    .payment-summary .amount {
+      grid-row: 1 / 3; grid-column: 2; align-self: center;
+      font-size: 21px; font-weight: 800; color: var(--navy);
+    }
+    .pay-section-title { font-size: 13px; font-weight: 800; margin-bottom: 10px; }
+    .payment-methods { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
+    .pay-method { position: relative; cursor: pointer; }
+    .pay-method input { position: absolute; opacity: 0; pointer-events: none; }
+    .pay-method span {
+      min-height: 72px; display: flex; flex-direction: column; gap: 7px;
+      align-items: center; justify-content: center; border: 1px solid var(--line-strong);
+      border-radius: 11px; font-size: 12px; font-weight: 700; color: var(--ink-soft);
+      transition: all 0.16s;
+    }
+    .pay-method .pay-icon { width: 28px; height: 28px; display: grid; place-items: center; line-height: 1; }
+    .pay-method .pay-icon svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .pay-method input:checked + span {
+      border: 2px solid var(--navy); color: var(--navy); background: #f1f5fb;
+      box-shadow: 0 0 0 3px rgba(11,37,69,0.08);
+    }
+    .card-options { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin: 14px 0 18px; }
+    .card-options select {
+      width: 100%; border: 1px solid var(--line-strong); border-radius: 9px;
+      padding: 12px 11px; background: #fff; color: var(--ink); font-size: 13px;
+    }
+    .payment-agree {
+      display: flex; align-items: flex-start; gap: 9px; padding: 13px 0 18px;
+      border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-soft); line-height: 1.55;
+    }
+    .payment-agree input { margin-top: 2px; accent-color: var(--navy); }
+    .pay-submit {
+      width: 100%; border: 0; border-radius: 10px; padding: 15px 18px;
+      background: var(--navy); color: #fff; font-size: 15px; font-weight: 800; cursor: pointer;
+    }
+    .pay-submit:hover { background: #123a69; }
+    .pay-error { min-height: 20px; color: var(--red); font-size: 12px; margin-top: 9px; text-align: center; }
+    .payment-processing { display: none; padding: 48px 28px 44px; text-align: center; }
+    .payment-processing.show { display: block; }
+    .pay-spinner {
+      width: 58px; height: 58px; margin: 0 auto 22px; border-radius: 50%;
+      border: 5px solid #e4e9ef; border-top-color: var(--navy); animation: spin 0.8s linear infinite;
+    }
+    .payment-processing h3 { color: var(--navy); font-size: 19px; }
+    .payment-processing p { color: var(--ink-soft); font-size: 13px; margin-top: 9px; line-height: 1.65; }
+    .process-steps { display: flex; justify-content: center; gap: 8px; margin-top: 24px; }
+    .process-dot { width: 8px; height: 8px; background: #d7dde6; border-radius: 50%; }
+    .process-dot.on { background: var(--green); box-shadow: 0 0 0 4px rgba(18,118,47,0.12); }
+
+    .complete-dialog {
+      width: min(470px, 100%); background: #fff; border-radius: 18px;
+      padding: 34px 28px 28px; text-align: center; box-shadow: 0 24px 70px rgba(3,18,40,0.3);
+    }
+    .complete-check {
+      width: 66px; height: 66px; border-radius: 50%; margin: 0 auto 18px;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--green-soft); color: var(--green); font-size: 34px; font-weight: 800;
+    }
+    .complete-dialog h2 { font-size: 22px; color: var(--navy); }
+    .complete-dialog > p { margin: 8px 0 20px; color: var(--ink-soft); font-size: 13px; }
+    .complete-details {
+      background: #f5f7fa; border-radius: 12px; padding: 15px 17px;
+      text-align: left; margin-bottom: 20px;
+    }
+    .complete-row { display: flex; justify-content: space-between; gap: 18px; padding: 6px 0; font-size: 13px; }
+    .complete-row span { color: var(--ink-soft); }
+    .complete-row strong { color: var(--ink); text-align: right; }
+
+    .payment-toast {
+      position: fixed; z-index: 1200; top: 22px; right: 22px;
+      width: min(360px, calc(100% - 32px)); display: flex; gap: 12px; align-items: flex-start;
+      padding: 15px 17px; border-radius: 12px; background: #fff;
+      border-left: 5px solid var(--green); box-shadow: 0 14px 42px rgba(3,18,40,0.22);
+      transform: translateX(calc(100% + 40px)); opacity: 0;
+      transition: transform 0.28s ease, opacity 0.28s ease;
+    }
+    .payment-toast.show { transform: translateX(0); opacity: 1; }
+    .payment-toast .ico { color: var(--green); font-size: 20px; font-weight: 800; }
+    .payment-toast strong { display: block; color: var(--navy); font-size: 14px; }
+    .payment-toast p { margin-top: 4px; color: var(--ink-soft); font-size: 12px; line-height: 1.5; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes riseIn {
+      from { opacity: 0; transform: translateY(12px) scale(0.98); }
+      to { opacity: 1; transform: none; }
+    }
+    @media (max-width: 560px) {
+      .payment-methods { grid-template-columns: 1fr; }
+      .pay-method span { min-height: 52px; flex-direction: row; }
+      .card-options { grid-template-columns: 1fr; }
+      .payment-toast { right: 16px; top: 16px; }
+    }
+
+    /* ── KTX형 사용자 대기실 ─────────────────────────────────── */
+    .queue-waiting-backdrop {
+      position: fixed; inset: 0; z-index: 1300; display: none;
+      align-items: center; justify-content: center; padding: 20px;
+      background: rgba(10, 17, 28, .82);
+    }
+    .queue-waiting-backdrop.show { display: flex; }
+    .queue-waiting-dialog {
+      width: min(680px, 100%); min-height: 760px; overflow: hidden;
+      background: #fff; text-align: center; box-shadow: 0 26px 90px rgba(0, 0, 0, .3);
+    }
+    .queue-waiting-header {
+      position: relative; display: flex; justify-content: center; align-items: center;
+      min-height: 82px; padding: 18px 28px; border-bottom: 1px solid #e5e7eb;
+    }
+    .queue-waiting-header::before {
+      content: ''; position: absolute; top: 16px; left: 28px; right: 28px;
+      height: 3px; background: linear-gradient(90deg, #b6b6b6 0 34%, transparent 34% 36%, #b6b6b6 36% 68%, transparent 68% 70%, #b6b6b6 70% 100%);
+    }
+    .queue-waiting-brand { margin-top: 8px; }
+    .queue-waiting-brand strong {
+      display: block; color: #1f2937; font-size: 23px; font-weight: 900; letter-spacing: -.06em;
+    }
+    .queue-waiting-brand span { display: block; margin-top: 2px; color: #7a8491; font-size: 12px; }
+    .queue-waiting-body { padding: 78px 72px 48px; }
+    .queue-waiting-body h2 {
+      margin: 0 0 52px; color: #171b22; font-size: 32px; font-weight: 800; letter-spacing: -.045em;
+    }
+    .queue-progress {
+      height: 14px; overflow: hidden; border-radius: 999px; background: #fdebec;
+    }
+    .queue-progress span {
+      display: block; width: 8%; height: 100%; border-radius: inherit;
+      background: #ed292f; transition: width .45s ease;
+    }
+    .queue-position { margin: 46px 0 30px; color: #353a42; font-size: 19px; }
+    .queue-position strong {
+      margin: 0 8px; color: #ed292f; font-size: 44px; font-weight: 900; letter-spacing: -.05em;
+    }
+    .queue-spinner {
+      width: 58px; height: 58px; margin: 28px auto 28px;
+      border: 7px solid #e4e4e4; border-top-color: #8f8f8f; border-radius: 50%;
+      animation: queue-spin 1.05s linear infinite;
+    }
+    @keyframes queue-spin { to { transform: rotate(360deg); } }
+    .queue-message { min-height: 72px; margin: 0; color: #777; font-size: 16px; line-height: 1.75; }
+    .queue-message span { color: #9a9a9a; font-size: 14px; }
+    .queue-cancel {
+      min-width: 190px; height: 54px; margin-top: 36px; border: 1px solid #d5d7db;
+      border-radius: 7px; background: #fff; color: #222; font-size: 16px; font-weight: 700; cursor: pointer;
+    }
+    .queue-cancel:hover { background: #f7f7f7; }
+    @media (max-width: 560px) {
+      .queue-waiting-backdrop { padding: 0; align-items: stretch; background: #fff; }
+      .queue-waiting-dialog { width: 100%; min-height: 100dvh; box-shadow: none; }
+      .queue-waiting-header { min-height: 76px; }
+      .queue-waiting-header::before { left: 16px; right: 16px; }
+      .queue-waiting-body { padding: 66px 24px 38px; }
+      .queue-waiting-body h2 { margin-bottom: 44px; font-size: 28px; }
+      .queue-position { margin-top: 40px; }
+      .queue-position strong { font-size: 40px; }
+      .queue-message { font-size: 15px; }
+    }
+
+    /* ── 2026-10-07 사용자 화면 개편 ───────────────────────── */
+    :root {
+      --navy: #123f70;
+      --navy-deep: #0b315c;
+      --navy-line: #53779a;
+      --blue: #086bb8;
+      --teal: #15927f;
+      --amber: #ffb21a;
+      --bg: #f4f7fa;
+      --line: #d8e0e8;
+      --ink: #12233a;
+      --ink-soft: #657489;
+    }
+    body { background: var(--bg); }
+    a { color: inherit; text-decoration: none; }
+
+    .site-header {
+      height: 82px; background: #fff; border-top: 4px solid var(--navy);
+      border-bottom: 1px solid #e3e8ee;
+    }
+    .site-header-inner {
+      max-width: 1180px; height: 100%; margin: 0 auto; padding: 0 0;
+      display: grid; grid-template-columns: 280px 1fr 220px; align-items: center;
+    }
+    .site-logo { display: flex; align-items: center; gap: 13px; width: max-content; }
+    .site-logo-mark {
+      width: 44px; height: 44px; border-radius: 50%; color: #fff;
+      background: linear-gradient(135deg, #0874a7, var(--teal));
+      display: grid; place-items: center; font-size: 22px; font-style: italic; font-weight: 900;
+    }
+    .site-logo strong { display: block; color: #174678; font-size: 21px; line-height: 1; letter-spacing: -.5px; }
+    .site-logo small { display: block; margin-top: 7px; color: #6e7c8f; font-size: 9px; font-weight: 700; letter-spacing: 1.7px; }
+    .site-nav { display: flex; justify-content: center; gap: 42px; height: 100%; }
+    .site-nav a { position: relative; display: grid; place-items: center; font-size: 15px; font-weight: 800; color: #243349; }
+    .site-nav a.active { color: #0069b8; }
+    .site-nav a.active::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: #0069b8; }
+    .site-user { justify-self: end; display: flex; gap: 18px; font-size: 12px; color: #6f7d8e; }
+
+    .breadcrumb {
+      max-width: 1180px; height: 45px; margin: 0 auto; display: flex; align-items: center;
+      gap: 9px; color: #8190a2; font-size: 12px;
+    }
+    .breadcrumb strong { color: #0768ae; }
+
+    .hero { padding: 0; background: linear-gradient(110deg, #123f70 0%, #154d7a 58%, #185c7a 100%); }
+    .hero-train { display: none; }
+    .hero-inner { max-width: 1180px; padding: 40px 0; }
+    .hero-top { padding: 0 0 22px; align-items: flex-end; }
+    .brand { display: block; }
+    .brand .mark { display: block; font-size: 30px; letter-spacing: -1.2px; }
+    .brand .sub { display: block; margin-top: 8px; color: #d7e6f2; font-size: 13px; letter-spacing: -.2px; }
+    .health {
+      padding: 8px 12px; border: 1px solid rgba(255,255,255,.26); border-radius: 999px;
+      background: rgba(255,255,255,.08); color: #e7f0f6; font-size: 11px;
+    }
+    .health-prefix { color: #bfd1df; }
+    .health-label { color: #fff; font-size: 11px; font-weight: 700; }
+    .board { padding: 0; }
+    .search-form { display: grid; grid-template-columns: 1fr 48px 1fr .84fr .58fr 150px; gap: 10px; align-items: stretch; }
+    .station-input, .control-field {
+      min-width: 0; padding: 14px 16px; border: 1px solid rgba(255,255,255,.25); border-radius: 5px;
+      background: rgba(255,255,255,.1); color: #fff;
+    }
+    .station-input label, .control-field > span {
+      display: block; margin-bottom: 8px; text-align: left; color: #9ed1e4;
+      font-size: 11px; font-weight: 700; letter-spacing: 0;
+    }
+    .station-input select, .control-field input, .control-field select {
+      width: 100%; height: 29px; padding: 0; border: 0; outline: 0; background: transparent;
+      color: #fff; font-size: 20px; font-weight: 800; text-align: left; text-align-last: left;
+      color-scheme: dark;
+    }
+    .station-input select { border-bottom: 0; }
+    .station-input select option, .control-field select option { color: var(--ink); background: #fff; }
+    .swap-btn {
+      width: 42px; height: 42px; align-self: center; margin: 0; border-color: rgba(255,255,255,.34);
+      color: #fff; background: rgba(255,255,255,.08);
+    }
+    .search-btn { width: 100%; flex: none; padding: 0 15px; border-radius: 5px; font-size: 15px; letter-spacing: 0; }
+
+    .layout { max-width: 1180px; margin: 0 auto; padding: 34px 0 56px; display: flex; flex-direction: column; gap: 24px; }
+    .side { width: 100%; position: static; }
+    .container { width: 100%; }
+    .panel { padding: 0; margin: 0; overflow: hidden; border-radius: 5px; }
+    .flow-steps { flex-direction: row; }
+    .step { flex: 1; min-height: 74px; padding: 16px 20px; gap: 12px; align-items: center; border-top: 3px solid transparent; }
+    .step + .step { border-left: 1px solid var(--line); }
+    .step:not(:last-child)::before { display: none; }
+    .step .num {
+      width: 30px; height: 30px; margin: 0; border: 1px solid #c9d5e1; color: #708097; background: #fff;
+      display: grid; place-items: center; font-size: 12px; font-weight: 800;
+    }
+    .step .label { color: var(--ink); font-size: 14px; }
+    .step-desc { margin-top: 4px; color: #8996a7; font-size: 11px; }
+    .step.active { border-top-color: #0c72bd; background: #f5faff; }
+    .step.active .num { border: 0; color: #fff; background: #0c72bd; box-shadow: none; }
+    .step.done .num { border: 0; color: #fff; background: var(--teal); }
+    .step.done .label { color: var(--ink); }
+
+    .intro-card {
+      min-height: 280px; display: grid; grid-template-columns: 1fr 350px; overflow: hidden;
+      border: 1px solid var(--line); border-radius: 5px; background: #fff;
+      box-shadow: 0 16px 36px rgba(16,48,78,.08);
+    }
+    .intro-copy { padding: 52px; }
+    .eyebrow { color: #006cb9; font-size: 11px; font-weight: 900; letter-spacing: 1.2px; }
+    .intro-copy h2 { margin-top: 18px; color: #10243d; font-size: 30px; line-height: 1.4; letter-spacing: -1.2px; }
+    .intro-copy p { margin-top: 15px; color: #65758b; font-size: 14px; line-height: 1.9; }
+    .intro-visual { display: grid; place-items: center; background: linear-gradient(145deg, #f1f8fb, #dfedf1); }
+    .ticket-shape {
+      width: 260px; height: 80px; padding: 0 24px; border: 1px solid #c8d7e3; border-radius: 15px;
+      background: rgba(255,255,255,.9); display: flex; align-items: center; gap: 20px;
+      color: #174678; transform: rotate(-7deg); box-shadow: 0 18px 24px rgba(39,76,102,.18);
+    }
+    .ticket-shape i { width: 76px; height: 42px; border-radius: 8px; background: #174678; }
+    .ticket-shape strong { font-size: 14px; letter-spacing: 1px; }
+
+    .search-summary { margin: 0; padding: 18px 22px; border: 1px solid var(--line); border-bottom: 0; border-radius: 5px 5px 0 0; background: #fff; font-size: 13px; }
+    .search-summary b { font-size: 18px; }
+    .train-list { border-radius: 0 0 5px 5px; box-shadow: 0 14px 32px rgba(16,48,78,.07); }
+    .train-item { padding: 20px 26px; border-left: 0; }
+    .train-item.selected { box-shadow: inset 4px 0 #0b72bd; }
+    .seat-select-card, .result-card { border-radius: 5px; box-shadow: 0 14px 32px rgba(16,48,78,.07); }
+    .seat-select-card { padding: 26px; }
+    .seat-select-card h3 { font-size: 20px; }
+    .seat-hint { margin-top: 6px; }
+    .car-shell { max-width: 800px; margin: 18px auto; padding: 28px; border-radius: 50px; }
+    .tseat { height: 42px; font-size: 13px; background: #fff; }
+
+    .tech-panel { width: 100%; border: 1px solid #bfd2e1; border-radius: 5px; background: #eef6fb; }
+    .tech-panel summary { padding: 14px 18px; cursor: pointer; color: #155783; font-size: 13px; font-weight: 800; text-align: right; list-style: none; }
+    .tech-panel summary::-webkit-details-marker { display: none; }
+    .tech-panel summary span { margin-right: 8px; padding: 3px 7px; border-radius: 3px; color: #fff; background: #168e80; font-size: 10px; }
+    .tech-flow { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; padding: 0 18px 18px; }
+    .tech-flow div { min-height: 125px; padding: 16px; border: 1px solid #cfdae4; background: #fff; }
+    .tech-flow b { color: #143f6d; font-size: 12px; }
+    .tech-flow p { margin: 10px 0 16px; color: #65758a; font-size: 11px; line-height: 1.55; }
+    .tech-flow code { color: #8090a4; font-size: 9px; word-break: break-all; }
+
+    .site-footer {
+      max-width: 1180px; min-height: 70px; margin: 0 auto; border-top: 1px solid #dce3ea;
+      display: flex; align-items: center; justify-content: space-between; color: #8190a2; font-size: 11px;
+    }
+
+    /* ── TICKET RAIL 통합형 접속 대기 화면 ─────────────────── */
+    .queue-waiting-backdrop {
+      padding: 0; align-items: stretch; background: #f1f6fb; backdrop-filter: none;
+    }
+    .queue-waiting-dialog {
+      position: relative; width: 100%; min-height: 100dvh; overflow: auto;
+      background:
+        radial-gradient(circle at 92% 72%, rgba(24,88,142,.09), transparent 26%),
+        radial-gradient(circle at 8% 88%, rgba(22,146,127,.07), transparent 24%),
+        linear-gradient(180deg, #eef5fb 0%, #f7f9fb 100%);
+      box-shadow: none; text-align: left;
+    }
+    .queue-waiting-dialog::after {
+      content: ''; position: fixed; z-index: 0; right: -4vw; bottom: 4vh;
+      width: 42vw; height: 13vw; max-height: 190px; opacity: .045; transform: skewX(-12deg);
+      border: 6px solid #174f82; border-radius: 70% 18% 18% 35%; pointer-events: none;
+    }
+    .queue-waiting-header {
+      position: relative; z-index: 2; min-height: 74px; padding: 0; background: #fff;
+      border-top: 4px solid #123f70; border-bottom: 1px solid #dde5ed;
+    }
+    .queue-waiting-header::before { display: none; }
+    .queue-header-inner {
+      width: min(1440px, calc(100% - 80px)); min-height: 70px; margin: 0 auto;
+      display: grid; grid-template-columns: 280px 1fr 220px; align-items: center;
+    }
+    .queue-waiting-brand { margin: 0; display: flex; align-items: center; gap: 11px; }
+    .queue-brand-mark {
+      width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%;
+      background: #123f70; color: #fff; font-size: 17px; font-weight: 900; font-style: italic;
+    }
+    .queue-waiting-brand strong { display: block; color: #143f70; font-size: 18px; letter-spacing: -.5px; }
+    .queue-waiting-header nav { height: 70px; display: flex; justify-content: center; gap: 54px; }
+    .queue-waiting-header nav span { position: relative; display: grid; place-items: center; color: #536477; font-size: 13px; font-weight: 700; }
+    .queue-waiting-header nav span.active { color: #096dbc; }
+    .queue-waiting-header nav span.active::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: #0c72bd; }
+    .queue-user-links { justify-self: end; display: flex; gap: 28px; color: #465970; font-size: 12px; font-weight: 700; }
+
+    .queue-waiting-body {
+      position: relative; z-index: 1; width: min(860px, calc(100% - 40px)); margin: 0 auto;
+      padding: 36px 0 56px;
+    }
+    .queue-booking-steps { display: flex; align-items: flex-start; justify-content: center; margin: 0 auto 28px; }
+    .queue-booking-steps > div { width: 92px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+    .queue-booking-steps b {
+      width: 36px; height: 36px; display: grid; place-items: center; border-radius: 50%;
+      background: #dce5ee; color: #8594a6; font-size: 13px;
+    }
+    .queue-booking-steps span { color: #78889a; font-size: 11px; font-weight: 700; }
+    .queue-booking-steps i { width: 110px; height: 2px; margin-top: 17px; background: #cbd6e1; }
+    .queue-booking-steps .done b, .queue-booking-steps .current b { color: #fff; background: #0b72c1; }
+    .queue-booking-steps .done span, .queue-booking-steps .current span { color: #086ab4; }
+    .queue-booking-steps .done + i { background: #0b72c1; }
+
+    .queue-card {
+      width: 100%; padding: 34px 44px 30px; border: 1px solid #d2dde7; border-radius: 7px;
+      background: rgba(255,255,255,.97); box-shadow: 0 18px 46px rgba(21,61,96,.12);
+    }
+    .queue-title-row { display: flex; align-items: center; justify-content: center; gap: 18px; text-align: left; }
+    .queue-title-row h2 { margin: 0; color: #12355f; font-size: 28px; font-weight: 900; letter-spacing: -1px; }
+    .queue-title-row p { margin-top: 6px; color: #64768a; font-size: 13px; }
+    .queue-clock {
+      position: relative; width: 42px; height: 42px; flex: 0 0 42px; border: 3px solid #164c7f; border-radius: 50%;
+    }
+    .queue-clock::before { content: ''; position: absolute; width: 2px; height: 11px; left: 18px; top: 8px; background: #164c7f; }
+    .queue-clock::after { content: ''; position: absolute; width: 10px; height: 2px; left: 18px; top: 18px; background: #164c7f; transform: rotate(15deg); transform-origin: left center; }
+    .queue-spinner {
+      width: 18px; height: 18px; margin: 0 0 0 2px; border: 2px solid #dbe5ee; border-top-color: #0b72c1;
+    }
+    .queue-progress { height: 10px; margin: 28px 0 22px; overflow: hidden; border-radius: 999px; background: #e3eaf1; }
+    .queue-progress span { width: 8%; background: linear-gradient(90deg, #0a5fa8, #0b76c7); }
+    .queue-stats {
+      display: grid; grid-template-columns: 1fr 1fr; min-height: 105px; margin-bottom: 20px;
+      border: 1px solid #dde6ee; border-radius: 6px; background: #fbfcfd;
+    }
+    .queue-stats > p { margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    .queue-stats > p + p { border-left: 1px solid #dce5ed; }
+    .queue-stats span { color: #697a8e; font-size: 12px; }
+    .queue-stats strong { margin-top: 8px; color: #102f57; font-size: 30px; font-weight: 900; letter-spacing: -1px; }
+    .queue-stats strong em { font-style: normal; }
+    .queue-train-summary {
+      min-height: 105px; padding: 18px 26px; border: 1px solid #d7e2eb; border-radius: 6px;
+      display: flex; align-items: center; gap: 28px; background: #fff;
+    }
+    .queue-train-type { color: #174e86; font-size: 24px; font-weight: 950; font-style: italic; letter-spacing: -2px; }
+    .queue-train-summary strong { display: block; color: #173650; font-size: 15px; }
+    .queue-train-summary p { margin: 6px 0 3px; color: #3d5269; font-size: 13px; }
+    .queue-train-summary div > span { color: #77879a; font-size: 11px; }
+    .queue-message { min-height: 0; margin: 20px 0 0; padding-top: 18px; border-top: 1px solid #dce5ed; text-align: center; }
+    .queue-message strong { color: #173b66; font-size: 15px; }
+    .queue-message span { display: inline-block; margin-top: 7px; color: #75869a; font-size: 12px; }
+    .queue-cancel {
+      width: 62%; min-width: 220px; height: 48px; display: block; margin: 22px auto 0;
+      border: 1px solid #0b6fbd; border-radius: 5px; background: #fff; color: #086ab4; font-size: 14px; font-weight: 800;
+    }
+    .queue-cancel:hover { background: #f2f8fc; }
+
+    @media (max-width: 760px) {
+      .queue-header-inner { width: 92vw; grid-template-columns: 1fr; }
+      .queue-waiting-header nav { display: none; }
+      .queue-user-links { display: none; }
+      .queue-waiting-body { width: 90vw; padding: 24px 0 40px; }
+      .queue-booking-steps i { width: clamp(18px, 6vw, 48px); }
+      .queue-booking-steps > div { width: 72px; }
+      .queue-booking-steps span { font-size: 10px; }
+      .queue-card { width: calc(100% - 24px); margin: 0 auto; padding: 28px 20px 24px; }
+      .queue-title-row { justify-content: flex-start; gap: 12px; }
+      .queue-title-row h2 { font-size: 22px; }
+      .queue-title-row p { font-size: 12px; }
+      .queue-spinner { margin-left: auto; }
+      .queue-stats strong { font-size: 24px; }
+      .queue-train-summary { padding: 17px 18px; gap: 18px; }
+      .queue-cancel { width: 100%; }
+    }
+    @media (max-width: 460px) {
+      .queue-user-links { display: none; }
+      .queue-booking-steps i { width: 16px; }
+      .queue-booking-steps > div { width: 64px; }
+      .queue-booking-steps b { width: 30px; height: 30px; }
+      .queue-booking-steps i { margin-top: 14px; }
+      .queue-stats { grid-template-columns: 1fr; }
+      .queue-stats > p + p { border-left: 0; border-top: 1px solid #dce5ed; }
+      .queue-clock { width: 36px; height: 36px; flex-basis: 36px; }
+      .queue-clock::before { left: 15px; top: 6px; }
+      .queue-clock::after { left: 15px; top: 16px; }
+    }
+
+    @media (max-width: 1200px) {
+      .site-header-inner, .breadcrumb, .hero-inner, .layout, .site-footer { margin-left: 24px; margin-right: 24px; }
+      .site-header-inner { grid-template-columns: 250px 1fr 170px; }
+      .site-nav { gap: 28px; }
+    }
+    @media (max-width: 900px) {
+      .site-header-inner { grid-template-columns: 1fr auto; }
+      .site-nav { display: none; }
+      .search-form { grid-template-columns: 1fr 44px 1fr; }
+      .control-field, .search-btn { min-height: 68px; }
+      .control-field { grid-row: 2; }
+      .control-field.pax { grid-column: 2; }
+      .search-btn { grid-row: 2; grid-column: 3; }
+      .intro-card { grid-template-columns: 1fr 280px; }
+      .tech-flow { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 640px) {
+      .site-header { height: 70px; }
+      .site-header-inner, .breadcrumb, .hero-inner, .layout, .site-footer {
+        width: calc(100% - 32px); margin-left: auto; margin-right: auto;
+      }
+      .site-user { display: none; }
+      .site-logo strong { font-size: 18px; }
+      .hero-inner { padding: 28px 0; }
+      .hero-top { flex-direction: column; align-items: flex-start; gap: 16px; }
+      .brand .mark { font-size: 26px; }
+      .health-prefix { display: none; }
+      .search-form { width: 100%; grid-template-columns: minmax(0, 1fr) minmax(0, .6fr); overflow: hidden; }
+      .search-form > * { min-width: 0; max-width: 100%; }
+      .station-input, .station-input.to { grid-column: 1 / -1; padding: 12px; }
+      .swap-btn { display: none; }
+      .station-input select, .control-field input, .control-field select { width: 100%; min-width: 0; max-width: 100%; font-size: 18px; }
+      .control-field { grid-row: auto; grid-column: 1; }
+      .control-field.pax { grid-row: auto; grid-column: 2; }
+      .search-btn { grid-row: auto; grid-column: 1 / -1; min-height: 52px; }
+      .flow-steps { flex-direction: column; }
+      .step + .step { border-left: 0; border-top: 1px solid var(--line); }
+      .intro-card { display: block; }
+      .intro-copy { padding: 34px 28px; }
+      .intro-copy h2 { font-size: 25px; }
+      .intro-visual { min-height: 180px; }
+      .tech-flow { grid-template-columns: 1fr; }
+      .tech-panel { overflow: hidden; }
+      .tech-panel summary { padding-left: 12px; padding-right: 12px; text-align: center; white-space: normal; }
+      .site-footer { padding: 20px 0; flex-direction: column; align-items: flex-start; gap: 8px; }
+    }
+    /* ── 2026-10-07: 조원 확정 시안 기반 전체 화면 재구현 ───── */
+    :root {
+      --rail-navy: #063b76;
+      --rail-blue: #0668c9;
+      --rail-ink: #10233f;
+      --rail-muted: #66768a;
+      --rail-line: #dfe7ef;
+      --rail-bg: #f5f8fb;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--rail-ink); background: #fff; font-family: "Pretendard", "Noto Sans KR", "Malgun Gothic", sans-serif; }
+    button, select, input { font: inherit; }
+
+    .site-header { position: relative; z-index: 50; height: 70px; border-bottom: 1px solid #dfe7ef; background: rgba(255,255,255,.98); box-shadow: 0 1px 8px rgba(25,55,90,.04); }
+    .site-header-inner { width: min(1420px, calc(100% - 64px)); height: 100%; margin: auto; display: grid; grid-template-columns: 260px 1fr 260px; align-items: center; }
+    .site-logo { display: inline-flex; align-items: center; gap: 9px; color: #073b77; text-decoration: none; }
+    .site-logo-mark, .queue-brand-mark { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; color: #fff; background: #063b76; font-size: 12px; transform: rotate(-25deg); }
+    .site-logo strong { color: #073b77; font-size: 18px; font-weight: 900; letter-spacing: -.7px; }
+    .site-logo small { display: none; }
+    .site-nav { height: 100%; display: flex; justify-content: center; gap: 46px; }
+    .site-nav a { position: relative; height: 100%; display: grid; place-items: center; color: #53657a; font-size: 13px; font-weight: 700; text-decoration: none; }
+    .site-nav a.active { color: var(--rail-blue); }
+    .site-nav a.active::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--rail-blue); }
+    .site-user { justify-self: end; display: flex; gap: 30px; }
+    .site-user a { color: #42566e; font-size: 13px; font-weight: 700; text-decoration: none; }
+    .breadcrumb, .hero-train, .hero-top, .side, .tech-panel { display: none !important; }
+
+    #bookingApp { min-height: 0; }
+    .hero { position: relative; min-height: 620px; padding: 0; overflow: hidden; background: linear-gradient(90deg, rgba(255,255,255,.32), rgba(255,255,255,.03)), url('assets/ticketrail-main-hero-v2.png') center 52% / cover no-repeat; }
+    .hero::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(255,255,255,.34) 0%, rgba(255,255,255,.12) 39%, rgba(255,255,255,0) 63%); pointer-events: none; }
+    .hero-inner { position: relative; z-index: 1; width: min(1420px, calc(100% - 80px)); min-height: 620px; margin: auto; padding: 58px 0 0; }
+    .hero-copy { width: 520px; }
+    .hero-copy h1 { margin: 0 0 16px; color: #10233f; font-size: 38px; font-weight: 900; line-height: 1.25; letter-spacing: -2px; }
+    .hero-copy p { margin: 0; color: #33445a; font-size: 16px; font-weight: 650; line-height: 1.65; }
+    .board { position: absolute; left: 50%; bottom: 30px; width: 690px; padding: 0; overflow: hidden; transform: translateX(-50%); border: 1px solid #dbe4ed; border-radius: 8px; background: #fff; box-shadow: 0 12px 34px rgba(31,58,88,.2); }
+    .booking-tabs { height: 54px; display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid #dfe6ee; }
+    .booking-tabs button { position: relative; border: 0; color: #34465c; background: #f7f9fb; font-size: 14px; font-weight: 800; cursor: pointer; }
+    .booking-tabs button.active { color: #073d7a; background: #fff; }
+    .booking-tabs button.active::after { content: ''; position: absolute; left: 30%; right: 30%; bottom: -1px; height: 3px; background: #073d7a; }
+    .search-form { display: grid; grid-template-columns: 1fr 46px 1fr 1fr 1fr; gap: 12px; padding: 22px; background: #fff; }
+    .station-input, .control-field { min-width: 0; padding: 0; border: 0; background: transparent; }
+    .station-input { position: relative; }
+    .station-input label, .control-field span { display: block; margin-bottom: 8px; color: #657589; font-size: 11px; font-weight: 700; }
+    .station-input select, .control-field input, .control-field select { width: 100%; height: 48px; padding: 0 13px 0 36px; border: 1px solid #d6e0ea; border-radius: 6px; color: #142942; background: #fff; font-size: 14px; font-weight: 750; }
+    .station-input::after { content: '●'; position: absolute; left: 13px; bottom: 16px; color: #0c65bd; font-size: 9px; pointer-events: none; }
+    .control-field { grid-row: 2; grid-column: 1 / 3; }
+    .control-field.pax { grid-column: 3 / 6; }
+    .control-field input, .control-field select { padding-left: 13px; }
+    .swap-btn { width: 40px; height: 40px; align-self: end; margin-bottom: 4px; border: 1px solid #d8e1eb; border-radius: 50%; color: #0b4d8d; background: #f8fafc; font-size: 18px; cursor: pointer; }
+    .search-btn { grid-column: 1 / -1; height: 50px; border: 0; border-radius: 5px; color: #fff; background: linear-gradient(90deg, #073f7f, #0759a8); font-size: 15px; font-weight: 850; cursor: pointer; }
+
+    .booking-workspace { display: none; min-height: calc(100vh - 70px); padding: 32px 0 70px; background: var(--rail-bg); }
+    body.view-results .hero,
+    body.view-seats .hero,
+    body.view-complete .hero { display: none; }
+    body.view-results .booking-workspace, body.view-seats .booking-workspace, body.view-complete .booking-workspace { display: block; }
+    .booking-steps { width: min(600px, calc(100% - 40px)); margin: 0 auto 28px; display: flex; align-items: flex-start; justify-content: center; border: 0; background: transparent; }
+    .booking-steps .step { position: relative; width: 150px; padding: 0; display: flex; flex-direction: column; align-items: center; gap: 7px; border: 0 !important; background: transparent; }
+    .booking-steps .step:not(:last-child)::after { content: ''; position: absolute; top: 16px; left: calc(50% + 18px); width: calc(100% - 36px); height: 2px; background: #cdd8e3; }
+    .booking-steps .num { position: relative; z-index: 2; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; color: #7f8da0; background: #dfe6ed; font-size: 12px; font-weight: 800; }
+    .booking-steps .body { margin: 0; }
+    .booking-steps .label { color: #7a899b; font-size: 11px; font-weight: 750; }
+    .booking-steps .step.done .num, .booking-steps .step.active .num { color: #fff; background: var(--rail-blue); }
+    .booking-steps .step.done .label, .booking-steps .step.active .label { color: var(--rail-blue); }
+    .booking-steps .step.done::after { background: var(--rail-blue); }
+    .container { width: min(1320px, calc(100% - 64px)); margin: auto; padding: 0; }
+    .banner { position: fixed; top: 82px; right: 24px; z-index: 100; max-width: 420px; }
+
+    #trainListSection { overflow: hidden; border: 1px solid var(--rail-line); border-radius: 8px; background: #fff; box-shadow: 0 4px 18px rgba(27,55,88,.07); }
+    .search-summary { min-height: 88px; padding: 20px 28px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--rail-line); background: #fff; }
+    .search-summary span { color: #152b46; font-size: 15px; }
+    .search-summary span b { display: block; margin-bottom: 6px; font-size: 22px; }
+    .search-summary button { padding: 9px 15px; border: 1px solid #126ac0; border-radius: 5px; color: #0c62b4; background: #fff; font-size: 12px; font-weight: 800; }
+    .train-tabs { height: 58px; display: flex; gap: 8px; align-items: end; padding: 0 28px; border-bottom: 1px solid var(--rail-line); }
+    .train-tabs button { min-width: 120px; height: 58px; border: 0; border-bottom: 3px solid transparent; color: #68788a; background: transparent; font-size: 13px; font-weight: 750; }
+    .train-tabs button.active { color: #073f7d; border-bottom-color: #073f7d; }
+    .train-list-head { min-height: 44px; padding: 0 28px; display: grid; grid-template-columns: 1.1fr 1.6fr .8fr .8fr .9fr 90px; gap: 14px; align-items: center; color: #738193; background: #f7f9fb; font-size: 11px; font-weight: 700; }
+    .train-list { display: block; }
+    .train-item { min-height: 92px; padding: 0 28px; display: grid; grid-template-columns: 1.1fr 1.6fr .8fr .8fr .9fr 90px; gap: 14px; align-items: center; border: 0; border-top: 1px solid #edf1f5; border-radius: 0; background: #fff; box-shadow: none; cursor: default; }
+    .train-item:hover { background: #fbfdff; transform: none; }
+    .train-top { grid-column: 1; grid-row: 1; align-self: center; display: flex; flex-direction: column; gap: 6px; }
+    .train-name { color: #15304e; font-size: 14px; font-weight: 850; }
+    .train-badge { order: -1; width: fit-content; padding: 0; color: #0757a3 !important; background: transparent !important; font-size: 11px; font-style: italic; }
+    .train-time-row { grid-column: 2; grid-row: 1; width: 100%; display: grid; grid-template-columns: minmax(0,1fr) 34px minmax(0,1fr); align-items: center; column-gap: 8px; }
+    .train-time { min-width: 0; display: flex; gap: 7px; align-items: center; }
+    .train-time:first-child { justify-content: flex-end; }
+    .train-time:last-child { justify-content: flex-start; }
+    .train-time .time { color: #132a44; font-size: 18px; font-weight: 900; }
+    .train-time .station { color: #607084; font-size: 11px; }
+    .train-duration { position: static; width: auto; display: grid; place-items: center; color: #49627d; font-size: 18px; line-height: 1; }
+    .train-duration::before, .train-duration::after { content: none; }
+    .train-run-time { grid-column: 3; grid-row: 1; align-self: center; color: #30465e; font-size: 12px; }
+    .train-bottom { display: contents; }
+    .fare { display: contents; }
+    .fare-row { grid-column: 5; grid-row: 1; align-self: center; color: #163252; font-size: 14px; font-weight: 850; }
+    .fare-row .cls { display: none; }
+    .fare-row.first { display: none; }
+    .seat-remain { grid-column: 4; grid-row: 1; align-self: center; justify-self: start; width: fit-content; margin: 0; padding: 5px 9px; border-radius: 999px; font-size: 11px; font-weight: 800; }
+    .seat-remain.wide { color: #178147; background: #eaf8f0; }
+    .seat-remain.mid { color: #b57412; background: #fff5df; }
+    .seat-remain.few { color: #d63a3a; background: #fff0f0; }
+    .seat-remain small { display: none; }
+    .train-item::after { content: '예매하기'; grid-column: 6; grid-row: 1; padding: 11px 12px; border-radius: 5px; color: #fff; background: linear-gradient(180deg,#0c5da9,#073e79); text-align: center; font-size: 12px; font-weight: 850; cursor: pointer; }
+    .train-item.soldout::after { content: '매진'; color: #8190a0; background: #e7ebef; cursor: default; }
+    .no-route { padding: 70px; text-align: center; color: #67788c; }
+
+    .seat-select-card { padding: 0; border: 0; background: transparent; box-shadow: none; }
+    .seat-train-summary { min-height: 94px; margin-bottom: 22px; padding: 20px 26px; display: grid; grid-template-columns: 90px 1fr 150px; align-items: center; border: 1px solid var(--rail-line); border-radius: 8px; background: #fff; box-shadow: 0 3px 12px rgba(25,55,88,.05); }
+    .train-mini-logo { color: #07539a; font-size: 27px; font-style: italic; font-weight: 950; letter-spacing: -3px; }
+    .seat-train-summary h3 { margin: 0 0 5px; color: #17304d; font-size: 17px; }
+    .seat-train-summary p { margin: 0; color: #68788b; font-size: 12px; }
+    .seat-train-summary > strong { justify-self: end; color: #233b56; font-size: 12px; text-align: right; }
+    .seat-train-summary em { display: inline-block; margin-top: 4px; color: #112a49; font-size: 17px; font-style: normal; }
+    .seat-title-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+    .seat-title-row h2 { margin: 0; color: #162f4d; font-size: 22px; }
+    .seat-legend { margin: 0; display: flex; gap: 18px; color: #6a7889; font-size: 11px; }
+    .seat-legend .sq { width: 13px; height: 13px; border-radius: 2px; }
+    .coach-tabs { height: 52px; margin-bottom: 14px; padding: 0 12px; display: grid; grid-template-columns: 44px repeat(5,1fr) 44px; align-items: center; border: 1px solid var(--rail-line); border-radius: 7px; background: #fff; }
+    .coach-tabs button { height: 34px; border: 0; border-radius: 5px; color: #42566e; background: transparent; font-size: 12px; font-weight: 750; cursor: pointer; }
+    .coach-tabs button.active { border: 1px solid #0b63b5; color: #074d91; background: #edf6ff; }
+    .seat-content { display: grid; grid-template-columns: minmax(0,1fr) 310px; gap: 20px; }
+    .car-shell { width: 100%; max-width: none; min-height: 460px; margin: 0; padding: 44px clamp(28px, 7vw, 88px); border: 1px solid var(--rail-line); border-radius: 8px; background: #fff; box-shadow: none; }
+    .seat-layout { width: min(100%, 520px); margin: 0 auto; display: grid; gap: 16px; }
+    .tseat { min-width: 72px; height: 58px; border: 1px solid #aebdca; border-radius: 9px 9px 4px 4px; color: #42566d; background: linear-gradient(#fff,#f6f8fa); font-size: 14px; font-weight: 800; cursor: pointer; }
+    .tseat.avail:hover { border-color: #1c70bf; background: #edf6ff; }
+    .tseat.sel { border-color: #07539a; color: #fff; background: #07539a; box-shadow: 0 4px 10px rgba(7,83,154,.22); }
+    .tseat.taken { border-color: #c8d0d8; color: #9aa5b0; background: #dce1e6; }
+    .tseat.prem { border-color: #91a9bf; color: #38536d; background: #f4f8fb; }
+    .seat-order { align-self: start; overflow: hidden; border: 1px solid var(--rail-line); border-radius: 8px; background: #fff; }
+    .seat-order > div { padding: 22px; }
+    .seat-order span { display: block; color: #5f7185; font-size: 12px; }
+    .sel-seat-info { min-height: 50px; margin-top: 8px; padding: 14px; display: block; border: 1px solid #dce5ed; border-radius: 5px; color: #173b63; background: #fff; font-size: 15px; }
+    .fare-box { border-top: 1px solid #e7edf2; background: #fafbfd; }
+    .fare-box b { display: block; margin-top: 8px; color: #203a58; text-align: right; }
+    .fare-box strong { margin-top: 18px; padding-top: 15px; display: flex; justify-content: space-between; border-top: 1px solid #dfe6ed; color: #173352; font-size: 13px; }
+    .fare-box em { color: #073f7d; font-size: 18px; font-style: normal; }
+    .seat-order .action-bar { padding: 0 22px 22px; display: grid; grid-template-columns: 1fr; gap: 8px; }
+    .seat-order .btn { width: 100%; min-height: 46px; border-radius: 5px; }
+    .seat-demo-panel { display: none; margin-top: 16px; overflow: hidden; border: 1px solid var(--rail-line); border-radius: 8px; background: #fff; }
+    .seat-demo-panel.show { display: block; }
+    .seat-order .btn-stress { border: 1px solid #0b63b5; color: #07539a; background: #edf6ff; }
+    .seat-order .btn-stress:disabled { border-color: #d6dfe8; color: #9aa8b6; background: #f2f4f6; }
+    .stress-panel { display: none; padding: 0 20px 16px; }
+    .stress-panel.show { display: block; }
+    .stress-result { min-height: 54px; padding: 11px 14px; display: grid; grid-template-columns: 100px 100px 1fr; gap: 12px; align-items: center; border-radius: 6px; background: #f4f8fc; }
+    .stress-stat { text-align: center; }
+    .stress-stat b { display: block; color: #17314f; font-size: 19px; }
+    .stress-stat small { color: #6b7c8f; font-size: 10px; }
+    .stress-stat.ok b { color: #087936; }
+    .stress-stat.conflict b { color: #d33b3b; }
+    .stress-desc { padding-left: 14px; border-left: 1px solid #dce5ed; color: #53677e; font-size: 11px; line-height: 1.55; }
+    .log-card { border-top: 1px solid #e6edf3; background: #10263f; }
+    .log-card h3 { margin: 0; padding: 12px 20px 8px; color: #b8c6d7; font-size: 11px; letter-spacing: .5px; }
+    .log-scroll { min-height: 58px; max-height: 150px; padding: 0 20px 14px; overflow-y: auto; color: #9fb0c5; font-family: ui-monospace, 'Cascadia Code', Consolas, monospace; font-size: 11px; line-height: 1.75; }
+    .log-entry .m { font-weight: 800; }
+    .log-entry .m.get, .log-entry .s.ok { color: #68d391; }
+    .log-entry .m.post { color: #f7c96b; }
+    .log-entry .s.err { color: #ff8585; }
+
+    .result-card { padding: 42px; border: 1px solid var(--rail-line); border-radius: 10px; background: #fff; box-shadow: 0 8px 28px rgba(25,55,88,.08); }
+    .completion-head { margin-bottom: 30px; text-align: center; }
+    .completion-check { width: 62px; height: 62px; margin: 0 auto 16px; display: grid; place-items: center; border-radius: 50%; color: #fff; background: #149449; box-shadow: 0 9px 22px rgba(20,148,73,.2); font-size: 30px; font-weight: 900; }
+    .completion-head h2 { margin: 0 0 8px; color: #102b4d; font-size: 28px; letter-spacing: -1px; }
+    .completion-head p { margin: 0; color: #68798c; font-size: 14px; }
+    .completion-ticket { overflow: hidden; border: 1px solid #d8e3ed; border-radius: 10px; background: #fff; }
+    .completion-train { min-height: 76px; padding: 18px 24px; display: grid; grid-template-columns: 74px 1fr auto; gap: 16px; align-items: center; border-bottom: 1px solid #e7edf3; background: #f8fbfe; }
+    .completion-logo { color: #07539a; font-size: 25px; font-style: italic; font-weight: 950; letter-spacing: -3px; }
+    .completion-train strong { color: #17314f; font-size: 17px; }
+    .completion-train small { margin-top: 4px; display: block; color: #6f7f90; font-size: 12px; font-weight: 500; }
+    .ticket-status { padding: 7px 10px; border-radius: 999px; font-size: 11px; font-weight: 850; }
+    .ticket-status.confirmed { color: #087936; background: #e8f7ee; }
+    .ticket-status.pending { color: #9a6300; background: #fff5da; }
+    .completion-route { padding: 28px 34px 22px; display: grid; grid-template-columns: 1fr minmax(150px,2fr) 1fr; align-items: center; }
+    .completion-station:last-child { text-align: right; }
+    .completion-city { color: #102844; font-size: 26px; font-weight: 900; }
+    .completion-time { margin-top: 5px; color: #5d7085; font-size: 13px; }
+    .completion-line { height: 1px; position: relative; border-top: 2px dotted #b9c8d6; }
+    .completion-line::after { content: '→'; position: absolute; left: 50%; top: 50%; padding: 0 9px; transform: translate(-50%,-55%); color: #0a5eac; background: #fff; font-size: 18px; }
+    .completion-details { padding: 0 34px 26px; display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; }
+    .completion-details div { padding: 15px 16px; border-radius: 7px; background: #f7f9fb; }
+    .completion-details span { display: block; margin-bottom: 7px; color: #8090a1; font-size: 11px; }
+    .completion-details strong { color: #17314f; font-size: 14px; }
+    .booking-number { margin: 0 34px 30px; padding: 20px 22px; display: grid; grid-template-columns: 1fr auto; gap: 6px 18px; align-items: center; border: 1px dashed #b9c9d8; border-radius: 8px; background: #fbfdff; }
+    .booking-number span { color: #75869a; font-size: 11px; }
+    .booking-number strong { color: #073f7d; font-size: 22px; letter-spacing: 2px; word-break: break-all; }
+    .booking-number button { grid-column: 2; grid-row: 1 / 3; min-width: 76px; height: 38px; border: 1px solid #126ac0; border-radius: 5px; color: #0a5fad; background: #fff; font-size: 12px; font-weight: 800; cursor: pointer; }
+    .completion-notice { margin-top: 18px; padding: 15px 18px; display: flex; gap: 12px; align-items: center; border-left: 4px solid #149449; border-radius: 6px; color: #31536f; background: #eef8f2; font-size: 13px; }
+    .completion-notice b { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; color: #fff; background: #149449; }
+    .completion-notice small { margin-top: 3px; display: block; color: #6d7e8f; }
+    .result-card > .action-bar { margin-top: 22px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .result-card > .action-bar .btn { min-height: 50px; border-radius: 6px; }
+
+    /* ── 기준 시안 1:1 재현용 최종 레이아웃 ─────────────────── */
+    .hero { min-height: 620px; overflow: hidden; }
+    .hero-inner { min-height: 620px; padding-top: 56px; }
+    .hero-copy { width: 520px; }
+    .hero-copy h1 { margin: 0 0 14px; font-size: 38px; line-height: 1.24; letter-spacing: -1.8px; }
+    .hero-copy p { font-size: 16px; line-height: 1.65; }
+    .board { left: 50%; bottom: 34px; width: 520px; transform: translateX(-50%); }
+    .search-form { grid-template-columns: 1fr 42px 1fr; gap: 12px 10px; padding: 25px 24px 24px; }
+    .control-field { grid-row: 2; grid-column: 1; }
+    .control-field.pax { grid-row: 2; grid-column: 3; }
+    .station-input label, .control-field span { text-align: center; }
+    .station-input select, .control-field input, .control-field select { padding-left: 36px; padding-right: 36px; text-align: center; text-align-last: center; }
+    .station-input::after { content: none; }
+    .swap-btn { justify-self: center; }
+    .search-btn { display: flex; align-items: center; justify-content: center; gap: 9px; }
+    .search-btn svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 2.1; stroke-linecap: round; }
+    .home-benefits { width: min(1180px, calc(100% - 80px)); min-height: 126px; margin: 30px auto 0; padding: 20px 0; display: grid; grid-template-columns: repeat(3,1fr); align-items: center; background: #fff; }
+    .home-benefits > div { position: relative; min-height: 64px; display: flex; align-items: center; justify-content: center; gap: 18px; }
+    .home-benefits > div + div::before { content: ''; position: absolute; left: 0; top: 5px; bottom: 5px; width: 1px; background: #e1e8ef; }
+    .home-benefits b { width: 46px; height: 46px; display: grid; place-items: center; color: #073f7f; font-size: 32px; font-weight: 500; }
+    .home-benefits b svg { width: 32px; height: 32px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+    .home-benefits p { margin: 0; }
+    .home-benefits strong, .home-benefits span { display: block; }
+    .home-benefits strong { color: #17314f; font-size: 15px; }
+    .home-benefits span { margin-top: 5px; color: #7b8998; font-size: 13px; }
+    body.view-results .hero, body.view-results .home-benefits,
+    body.view-seats .hero, body.view-seats .home-benefits,
+    body.view-complete .hero, body.view-complete .home-benefits { display: none; }
+
+    .booking-workspace { background: #fff; }
+    body.view-results .booking-steps, body.view-complete .booking-steps { display: none; }
+    body.view-results .booking-workspace, body.view-complete .booking-workspace { padding-top: 26px; }
+    .container { width: min(1180px, calc(100% - 56px)); }
+    #trainListSection { border: 0; border-radius: 0; box-shadow: none; }
+    .search-summary { min-height: 92px; margin-bottom: 0; padding: 20px 24px; border: 1px solid #e5ebf1; border-radius: 7px; background: #fbfcfe; }
+    .search-summary span b { font-size: 22px; }
+    .search-summary .summary-meta { margin-top: 8px; display: flex; gap: 28px; color: #56687d; font-size: 12px; }
+    #tripDate { cursor: pointer; }
+    .train-tabs { padding: 0 18px; justify-content: space-between; }
+    .train-tabs button { flex: 1; min-width: 0; }
+    .train-grid { grid-template-columns: 150px minmax(290px,1.7fr) 120px 110px 130px 94px; column-gap: 10px; }
+    .train-list-head { padding: 0 18px; grid-template-columns: 150px minmax(290px,1.7fr) 120px 110px 130px 94px; gap: 10px; }
+    .train-list-head span { text-align: center; }
+    .train-list-head span:first-child { text-align: left; }
+    .train-item { min-height: 78px; padding: 0 18px; grid-template-columns: 150px minmax(290px,1.7fr) 120px 110px 130px 94px; gap: 10px; }
+    .train-top { align-items: flex-start; justify-content: center; margin: 0; text-align: left; }
+    .train-time-row { grid-template-columns: minmax(0,1fr) 26px minmax(0,1fr); column-gap: 5px; }
+    .train-time .time { font-size: 17px; }
+    .train-run-time, .fare-row, .seat-remain { justify-self: center; }
+
+    .seat-train-summary { min-height: 88px; margin-bottom: 18px; grid-template-columns: 72px 1fr 145px; }
+    .seat-title-row h2 { font-size: 20px; }
+    .coach-tabs { margin-bottom: 16px; }
+    .seat-content { grid-template-columns: minmax(0,1fr) 260px; gap: 18px; }
+    .car-shell { min-height: 330px; padding: 28px clamp(30px, 7vw, 80px); }
+    .seat-layout { width: min(100%, 430px); gap: 11px; }
+    .seat-column-head { display: flex; gap: 10px; align-items: center; color: #42566e; font-size: 10px; font-weight: 800; text-align: center; }
+    .seat-column-head span { flex: 1; min-width: 42px; }
+    .seat-column-head i { width: 34px; flex: 0 0 34px; }
+    .tseat { min-width: 42px; height: 40px; border-radius: 5px 5px 3px 3px; font-size: 11px; }
+    .seat-order > div { padding: 18px; }
+    .sel-seat-info { min-height: 48px; font-size: 13px; }
+    .seat-order .action-bar { padding: 0 18px 18px; }
+    .seat-order .btn { min-height: 43px; }
+    .seat-order .btn-hold, .seat-order .btn-book { color: #fff; background: linear-gradient(90deg,#073f7f,#0759a8); }
+    .seat-order .btn-cancel { border: 1px solid #cfdbe6; color: #53677e; background: #fff; }
+    .stress-panel { padding: 0 18px 14px; }
+
+    .result-card { padding: 30px 34px; border: 0; box-shadow: none; }
+    .result-card .ticket { margin: 0; border: 0; }
+    .completion-check { width: 48px; height: 48px; margin-bottom: 14px; font-size: 24px; box-shadow: none; }
+    .completion-head { margin-bottom: 24px; }
+    .completion-head h2 { font-size: 25px; }
+    .completion-line::after { content: none; }
+    .reference-complete-card { overflow: hidden; border: 1px solid #dce5ed; border-radius: 7px; background: #fff; }
+    .complete-booking-bar { min-height: 54px; padding: 13px 20px; display: grid; grid-template-columns: 100px 1fr; align-items: center; background: #f3f7fa; }
+    .complete-booking-bar span { color: #6f7f90; font-size: 11px; }
+    .complete-booking-bar strong { color: #17314f; font-size: 15px; letter-spacing: .5px; }
+    .complete-trip-row { min-height: 104px; padding: 18px 20px; display: grid; grid-template-columns: 70px 1fr 90px 24px 90px 90px; gap: 12px; align-items: center; border-bottom: 1px solid #e5ebf1; }
+    .complete-trip-logo { color: #07539a; font-size: 22px; font-style: italic; font-weight: 950; letter-spacing: -3px; }
+    .complete-trip-name strong { display: block; color: #17314f; font-size: 14px; }
+    .complete-trip-name small { margin-top: 5px; display: block; color: #708093; font-size: 11px; }
+    .complete-trip-time { text-align: center; }
+    .complete-trip-time strong { display: block; color: #102844; font-size: 19px; }
+    .complete-trip-time small { color: #617286; font-size: 11px; }
+    .complete-trip-arrow { color: #345979; text-align: center; }
+    .complete-trip-duration { color: #53677e; font-size: 12px; text-align: center; }
+    .complete-meta { padding: 18px 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px 34px; }
+    .complete-meta div { display: grid; grid-template-columns: 90px 1fr; }
+    .complete-meta span { color: #788798; font-size: 11px; }
+    .complete-meta strong { color: #1d354f; font-size: 12px; }
+
+    .booking-history { min-height: 570px; display: grid; grid-template-columns: 220px 1fr; border: 1px solid #e3e9ef; background: #fff; }
+    .history-side { position: relative; padding: 30px 18px; border-right: 1px solid #e5ebf1; background: #fbfcfd; }
+    .history-user { margin-bottom: 28px; display: grid; grid-template-columns: 42px 1fr; align-items: center; }
+    .history-user > span { grid-row: 1 / 3; width: 36px; height: 36px; display: grid; place-items: center; border-radius: 50%; color: #c8d0d9; background: #e7ebef; }
+    .history-user strong { color: #1d334f; font-size: 15px; }
+    .history-user small { color: #7d8b9a; font-size: 11px; }
+    .history-side button { width: 100%; height: 44px; padding: 0 12px; border: 0; border-radius: 5px; color: #4f6074; background: transparent; text-align: left; font-size: 12px; font-weight: 700; }
+    .history-side button.active { color: #0756a3; background: #edf5fc; }
+    .history-side button.logout { position: absolute; left: 18px; right: 18px; bottom: 24px; width: calc(100% - 36px); display: flex; align-items: center; gap: 9px; cursor: pointer; }
+    .history-side button.logout:hover { color: #0756a3; background: #edf5fc; }
+    .history-side button.logout svg { width: 16px; height: 16px; flex: 0 0 16px; overflow: visible; stroke: currentColor; }
+    .history-main { padding: 34px 40px; }
+    .history-main h2 { margin: 0 0 22px; color: #142d4b; font-size: 24px; }
+    .history-tabs { display: flex; gap: 0; margin-bottom: 18px; border-bottom: 1px solid #e1e8ef; }
+    .history-tabs button { min-width: 150px; height: 46px; border: 0; border-bottom: 3px solid transparent; color: #748295; background: transparent; font-weight: 750; }
+    .history-tabs button.active { color: #0756a3; border-bottom-color: #0756a3; }
+    .history-booking { margin-bottom: 12px; padding: 20px 22px; display: grid; grid-template-columns: 70px 1fr 130px; gap: 18px; align-items: center; border: 1px solid #dfe7ef; border-radius: 7px; }
+    .history-booking .history-logo { color: #07539a; font-size: 20px; font-style: italic; font-weight: 950; }
+    .history-booking strong, .history-booking span { display: block; }
+    .history-booking small { display: block; margin-top: 5px; color: #6f7f90; }
+    .history-booking .history-price { color: #143359; text-align: right; font-size: 17px; font-weight: 850; }
+    .history-booking button { margin-top: 8px; padding: 7px 12px; border: 1px solid #1670c6; border-radius: 4px; color: #0b62b3; background: #fff; font-size: 11px; cursor: pointer; }
+    .history-booking button:hover { color: #fff; background: #0b62b3; }
+    .booking-detail-dialog { width: min(920px, 100%); overflow: hidden; border-radius: 8px; background: #fff; box-shadow: 0 24px 70px rgba(3,18,40,.3); animation: riseIn .22s ease-out; }
+    .booking-detail-body { padding: 0; }
+    .booking-detail-ticket { overflow: hidden; border: 1px solid #d5e0ea; border-radius: 8px; background: #fff; }
+    .booking-detail-number { min-height: 56px; padding: 0 20px; display: grid; grid-template-columns: 90px 1fr 32px; align-items: center; background: #f0f5f9; }
+    .booking-detail-number span { color: #7b8a9b; font-size: 11px; }
+    .booking-detail-number strong { color: #0a376c; font-size: 16px; letter-spacing: .6px; }
+    .booking-detail-number button { width: 28px; height: 28px; border: 0; border-radius: 4px; color: #6c7f92; background: transparent; font-size: 14px; cursor: pointer; }
+    .booking-detail-number button:hover { background: #e1e9f1; }
+    .booking-detail-trip { min-height: 102px; padding: 20px; display: grid; grid-template-columns: 65px 1.3fr 90px 28px 90px 90px; gap: 14px; align-items: center; }
+    .booking-detail-logo { color: #07539a; font-size: 23px; font-style: italic; font-weight: 950; letter-spacing: -2px; }
+    .booking-detail-train strong { display: block; color: #17314f; font-size: 15px; }
+    .booking-detail-train span { margin-top: 5px; display: block; color: #758598; font-size: 11px; }
+    .booking-detail-time { text-align: center; }
+    .booking-detail-time strong { display: block; color: #102844; font-size: 19px; }
+    .booking-detail-time span { margin-top: 5px; display: block; color: #6f7f90; font-size: 11px; }
+    .booking-detail-arrow { color: #365d7f; text-align: center; font-size: 18px; }
+    .booking-detail-duration { color: #607287; font-size: 11px; text-align: center; }
+    .booking-detail-info { padding: 15px 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 9px 48px; border-top: 1px solid #dfe7ef; background: #fbfcfd; }
+    .booking-detail-info div { display: grid; grid-template-columns: 90px 1fr; align-items: center; }
+    .booking-detail-info span { color: #778699; font-size: 11px; }
+    .booking-detail-info strong { color: #17314f; font-size: 12px; }
+    .booking-detail-info .payment-state { color: #07823c; }
+    .site-footer { width: min(1180px, calc(100% - 80px)); margin: 54px auto 0; padding: 24px 0 30px; display: flex; justify-content: space-between; border-top: 1px solid #dfe7ef; color: #8995a3; font-size: 11px; }
+
+    @media (max-width: 900px) {
+      .site-header-inner { width: calc(100% - 32px); grid-template-columns: 1fr auto; }
+      .site-nav { display: none; }
+      .site-user { gap: 14px; }
+      .hero { min-height: 660px; background-position: 66% center; }
+      .hero::after { background: linear-gradient(180deg, rgba(255,255,255,.5), rgba(255,255,255,.1)); }
+      .hero-inner { width: calc(100% - 32px); min-height: 660px; padding-top: 36px; }
+      .hero-copy { width: 100%; }
+      .hero-copy h1 { font-size: 29px; }
+      .board { left: 50%; width: 100%; bottom: 24px; transform: translateX(-50%); }
+      .search-form { grid-template-columns: 1fr 38px 1fr; }
+      .control-field { grid-row: 2; grid-column: 1; }
+      .control-field.pax { grid-row: 2; grid-column: 3; }
+      .container { width: calc(100% - 24px); }
+      .booking-steps { flex-direction: row; }
+      .booking-steps .step { width: 25%; }
+      .train-list-head { display: none; }
+      .train-item { padding: 18px; grid-template-columns: 1fr 1.5fr; gap: 14px; }
+      .train-top { grid-column: 1; grid-row: 1; }
+      .train-time-row { grid-column: 2; grid-row: 1; }
+      .train-run-time { grid-column: 1; grid-row: 2; }
+      .fare-row { grid-column: 1; grid-row: 3; }
+      .seat-remain { grid-column: 2; grid-row: 2; }
+      .train-item::after { grid-column: 2; grid-row: 3; }
+      .seat-content { grid-template-columns: 1fr; }
+      .seat-order { width: 100%; }
+      .car-shell { padding: 24px 8%; }
+      .stress-result { grid-template-columns: 1fr 1fr; }
+      .stress-desc { grid-column: 1 / -1; padding: 10px 0 0; border-top: 1px solid #dce5ed; border-left: 0; }
+      .result-card { padding: 24px 18px; }
+      .completion-train { grid-template-columns: 64px 1fr; }
+      .completion-train .ticket-status { grid-column: 1 / -1; justify-self: start; }
+      .completion-route { padding: 24px 18px 18px; grid-template-columns: 1fr 70px 1fr; }
+      .completion-details { padding: 0 18px 20px; grid-template-columns: 1fr 1fr; }
+      .booking-number { margin: 0 18px 22px; }
+    }
+    @media (max-width: 600px) {
+      .car-shell { padding: 24px 14px; }
+      .seat-layout > div { gap: 6px !important; }
+      .seat-layout > div > div { width: 24px !important; flex-basis: 24px !important; }
+      .tseat { min-width: 0; height: 50px; font-size: 12px; }
+      .booking-detail-trip { padding: 18px; grid-template-columns: 55px 1fr 70px 22px 70px; }
+      .booking-detail-duration { display: none; }
+      .booking-detail-info { grid-template-columns: 1fr; gap: 9px; }
+    }
+    /* 결제 지연/승인 결과: 안심 안내형. 설명 박스와 중복 완료 팝업은 표시하지 않는다. */
+    .result-card.payment-result { max-width: 790px; margin: 0 auto; padding: 30px 34px; }
+    .payment-flow { display: flex; align-items: center; justify-content: center; gap: 14px; margin-bottom: 32px; list-style: none; color: #71808c; font-size: 12px; }
+    .payment-flow li { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+    .payment-flow .flow-dot { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: #f1f4f7; }
+    .payment-flow .flow-done { color: var(--green); }
+    .payment-flow .flow-done .flow-dot { background: var(--green-soft); }
+    .payment-flow .flow-current { color: var(--warn); font-weight: 700; }
+    .payment-flow .flow-current .flow-dot { background: var(--warn-soft); }
+    .payment-flow .flow-line { width: 30px; height: 1px; background: var(--line); }
+    .payment-result .completion-head { text-align: center; margin-bottom: 28px; }
+    .payment-result .completion-check { width: 58px; height: 58px; margin: 0 auto 17px; color: var(--green); background: var(--green-soft); }
+    .payment-result.is-pending .completion-check { color: var(--warn); background: var(--warn-soft); }
+    .payment-result.is-failed .completion-check { color: var(--red); background: var(--red-soft); }
+    .payment-result .payment-eyebrow { margin-bottom: 8px; font-size: 12px; font-weight: 700; color: var(--green); }
+    .payment-result.is-pending .payment-eyebrow { color: var(--warn); }
+    .payment-result.is-failed .payment-eyebrow { color: var(--red); }
+    .payment-result .completion-head h2 { margin: 0; font-size: 25px; line-height: 1.5; word-break: keep-all; }
+    .payment-auto-status { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 18px; color: #61757b; font-size: 12px; font-variant-numeric: tabular-nums; }
+    .payment-status-spinner { width: 13px; height: 13px; border: 2px solid #dce6e8; border-top-color: var(--warn); border-radius: 50%; animation: payment-status-spin 1.3s linear infinite; }
+    @keyframes payment-status-spin { to { transform: rotate(360deg); } }
+    .payment-result #paymentLine { color: var(--warn); }
+    .payment-result.is-approved #paymentLine { color: var(--green); }
+    .payment-result.is-failed #paymentLine { color: var(--red); }
+    .payment-result .action-bar { display: flex; gap: 10px; margin-top: 22px; }
+    .payment-result .action-bar .btn { flex: 1; min-height: 44px; }
+    .payment-result .btn-book { color: #fff; background: var(--green); }
+    @media (max-width: 600px) {
+      .result-card.payment-result { padding: 26px 16px; }
+      .payment-flow { gap: 6px; font-size: 11px; }
+      .payment-flow li { gap: 4px; }
+      .payment-flow .flow-line { width: 14px; }
+      .payment-result .completion-head h2 { font-size: 22px; }
+      .payment-result .complete-trip-row { grid-template-columns: 52px minmax(0,1fr) 66px; gap: 12px; }
+      .payment-result .complete-trip-name { grid-column: 2 / 4; }
+      .payment-result .complete-trip-time { grid-row: 2; }
+      .payment-result .complete-trip-arrow { grid-row: 2; }
+      .payment-result .complete-trip-duration { grid-column: 1 / -1; }
+      .payment-result .complete-meta { grid-template-columns: 1fr; gap: 12px; padding: 18px 16px; }
+      .payment-result .complete-booking-bar { padding: 12px 16px; grid-template-columns: 100px minmax(0,1fr); }
+      .payment-result .action-bar { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <div class="site-header-inner">
+      <a class="site-logo" href="/ticketing.html" aria-label="Ticket Rail 홈">
+        <span class="site-logo-mark">➤</span><strong>TICKET RAIL</strong>
+      </a>
+      <nav class="site-nav" aria-label="주요 메뉴">
+        <a class="active" href="/ticketing.html">열차 조회</a>
+        <a href="#" onclick="return false;">이용안내</a>
+        <a href="#" onclick="return false;">고객센터</a>
+      </nav>
+      <div class="site-user" aria-hidden="true"></div>
+    </div>
+  </header>
+
+  <main id="bookingApp">
+    <section class="hero" id="homeHero">
+      <div class="hero-inner">
+        <div class="hero-copy">
+          <h1>어디로 떠나시나요?</h1>
+          <p>출발지와 도착지를 선택하고 원하는 열차를 조회해보세요.</p>
+        </div>
+        <div class="board">
+          <div class="search-form">
+          <div class="station-input">
+            <label>출발역</label>
+            <select id="fromStation" aria-label="출발역">
+              <option value="서울" selected>서울</option>
+              <option value="부산">부산</option>
+              <option value="대전">대전</option>
+              <option value="대구">대구</option>
+              <option value="광주">광주</option>
+              <option value="전주">전주</option>
+              <option value="강릉">강릉</option>
+            </select>
+          </div>
+          <button class="swap-btn" onclick="swapStations()" aria-label="출발·도착 바꾸기">⇄</button>
+          <div class="station-input to">
+            <label>도착역</label>
+            <select id="toStation" aria-label="도착역">
+              <option value="서울">서울</option>
+              <option value="부산" selected>부산</option>
+              <option value="대전">대전</option>
+              <option value="대구">대구</option>
+              <option value="광주">광주</option>
+              <option value="전주">전주</option>
+              <option value="강릉">강릉</option>
+            </select>
+          </div>
+          <label class="control-field"><span>출발일</span><input type="date" id="tripDate" aria-label="출발일" onclick="openDepartureCalendar()"></label>
+          <label class="control-field pax"><span>인원</span><select id="paxCount" aria-label="인원">
+              <option value="1">1명</option>
+              <option value="2">2명</option>
+              <option value="3">3명</option>
+              <option value="4">4명</option>
+            </select></label>
+            <button class="search-btn" onclick="searchTrains()"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5L21 21"></path></svg><span>열차 조회하기</span></button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="home-benefits" id="introCard">
+      <div><b><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7v5l3 2"></path></svg></b><p><strong>빠른 예매</strong><span>간편한 예매 절차</span></p></div>
+      <div><b><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v9h10V7a3 3 0 0 1 3 3v8M6 13H4a2 2 0 0 0-2 2v3m4 0v2m13-2v2M6 16h13"></path></svg></b><p><strong>편안한 여행</strong><span>다양한 좌석 선택</span></p></div>
+      <div><b><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.4 8-8 9-4.6-1-8-4-8-9V6z"></path><path d="M8.5 12l2.2 2.2 4.8-5"></path></svg></b><p><strong>안전한 서비스</strong><span>신뢰할 수 있는 시스템</span></p></div>
+    </section>
+
+    <section class="booking-workspace" id="bookingWorkspace">
+      <div class="booking-steps flow-steps" id="flowSteps" aria-label="예매 진행 단계">
+          <div class="step active" data-step="1">
+            <div class="num">1</div>
+            <div class="body"><div class="label">열차 선택</div></div>
+          </div>
+          <div class="step" data-step="2">
+            <div class="num">2</div>
+            <div class="body"><div class="label">좌석 선택</div></div>
+          </div>
+          <div class="step" data-step="3">
+            <div class="num">3</div>
+            <div class="body"><div class="label">결제</div></div>
+          </div>
+          <div class="step" data-step="4"><div class="num">4</div><div class="body"><div class="label">예매 완료</div></div></div>
+      </div>
+
+      <div class="container">
+      <div class="banner" id="banner">
+        <span id="bannerMsg"></span>
+        <button class="b-close" onclick="hideBanner()" aria-label="닫기">✕</button>
+      </div>
+
+      <div id="trainListSection" style="display:none;">
+        <div class="search-summary"><span id="searchSummary"></span><button type="button" onclick="showHomeView()">조회 변경</button></div>
+        <div class="train-tabs">
+          <button class="active" data-train-type="all" onclick="filterTrainType('all', this)">전체 (0)</button>
+          <button data-train-type="ktx" onclick="filterTrainType('ktx', this)">KTX (0)</button>
+          <button data-train-type="itx" onclick="filterTrainType('itx', this)">ITX-새마을 (0)</button>
+          <button data-train-type="mugunghwa" onclick="filterTrainType('mugunghwa', this)">무궁화호 (0)</button>
+        </div>
+        <div class="train-list-head"><span>열차정보</span><span>출발 → 도착</span><span>소요시간</span><span>좌석</span><span>일반실 요금</span><span></span></div>
+        <div class="train-list" id="trainList"></div>
+      </div>
+
+      <div class="seat-select-card" id="seatSelectCard">
+        <div class="seat-train-summary"><span class="train-mini-logo">KTX</span><div><h3 id="seatSelectTitle">좌석 선택</h3><p id="seatRouteSummary">선택한 열차</p></div><strong>일반실<br><em id="seatFareSummary">-</em></strong></div>
+        <div class="seat-title-row"><h2>좌석 선택</h2><div class="seat-legend">
+          <span class="lg"><span class="sq avail"></span>선택 가능</span>
+          <span class="lg"><span class="sq sel"></span>선택한 좌석</span>
+          <span class="lg"><span class="sq taken"></span>예매 완료</span>
+        </div>
+        </div>
+        <div class="coach-tabs" aria-label="호차 선택">
+          <button type="button" onclick="changeCoach(-1)" aria-label="이전 호차">‹</button>
+          <button type="button" data-coach="1" onclick="selectCoach(1)">1호차</button>
+          <button type="button" data-coach="2" class="active" onclick="selectCoach(2)">2호차</button>
+          <button type="button" data-coach="3" onclick="selectCoach(3)">3호차</button>
+          <button type="button" data-coach="4" onclick="selectCoach(4)">4호차</button>
+          <button type="button" data-coach="5" onclick="selectCoach(5)">5호차</button>
+          <button type="button" onclick="changeCoach(1)" aria-label="다음 호차">›</button>
+        </div>
+        <div class="seat-content">
+          <div class="car-shell"><div class="seat-layout" id="seatLayout"></div></div>
+          <aside class="seat-order">
+            <div><span>선택한 좌석</span><strong class="sel-seat-info" id="selSeatInfo">좌석을 선택해주세요</strong></div>
+            <div class="fare-box"><span>일반실 1명</span><b id="seatOrderPrice">-</b><strong>총 결제 금액 <em id="seatOrderTotal">-</em></strong></div>
+            <div class="action-bar">
+              <button class="btn btn-hold" id="holdTrainBtn" onclick="holdTrainSeat()" disabled>좌석 선택</button>
+              <button class="btn btn-book" id="bookTrainBtn" onclick="openPaymentModal()" disabled style="display:none;">결제하기</button>
+              <button class="btn btn-stress" id="stressBtn" type="button" onclick="stressSeat(5)" disabled>좌석 5건 선택</button>
+              <button class="btn btn-cancel" onclick="cancelSeatSelect()">선택 취소</button>
+            </div>
+          </aside>
+        </div>
+        <section class="seat-demo-panel" id="seatDemoPanel" aria-label="좌석 동시성 시연">
+          <div class="stress-panel" id="stressPanel">
+            <div class="stress-result">
+              <div class="stress-stat ok"><b id="stressOk">-</b><small>선점 성공</small></div>
+              <div class="stress-stat conflict"><b id="stressConflict">-</b><small>충돌 409</small></div>
+              <div class="stress-desc" id="stressDesc"></div>
+            </div>
+          </div>
+          <div class="log-card">
+            <h3>API 통신 로그</h3>
+            <div class="log-scroll" id="logPanel"></div>
+          </div>
+        </section>
+      </div>
+
+      <div class="result-card" id="resultCard">
+        <div class="ticket" id="ticketVisual"></div>
+        <div class="action-bar">
+          <button class="btn btn-cancel" onclick="showBookingHistory()" id="refreshBtn" style="display:none;">예매 내역 보기</button>
+          <button class="btn btn-book" id="paymentCheckBtn" onclick="checkPaymentNow()" style="display:none;">상태 다시 확인</button>
+          <button class="btn btn-book" id="ticketViewBtn" onclick="viewApprovedTicket()" style="display:none;">승차권 확인</button>
+        </div>
+      </div>
+      <div class="booking-history" id="bookingHistory" style="display:none;">
+        <aside class="history-side">
+          <div class="history-user"><span>●</span><strong>홍길동님</strong><small>안녕하세요!</small></div>
+          <button class="active">▣&nbsp; 예매 내역</button>
+          <button>♟&nbsp; 회원 정보 수정</button>
+          <button>♙&nbsp; 비밀번호 변경</button>
+          <button class="logout" type="button" onclick="logout()">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M10 5H6.8A1.8 1.8 0 0 0 5 6.8v10.4A1.8 1.8 0 0 0 6.8 19H10" stroke-width="1.8" stroke-linecap="round"/>
+              <path d="M13 8l4 4-4 4M17 12H9" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span>로그아웃</span>
+          </button>
+        </aside>
+        <section class="history-main">
+          <h2>예매 내역</h2>
+          <div class="history-tabs"><button class="active" id="upcomingBookingTab">예정된 예매 (0)</button></div>
+          <div id="historyBookings"></div>
+        </section>
+      </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer"><span>이용약관 · 여객운송약관 · 개인정보처리방침 · 고객센터</span><span>Copyright © TICKET RAIL. All rights reserved.</span></footer>
+
+  <div class="modal-backdrop" id="bookingDetailModal" role="dialog" aria-modal="true" aria-label="예매 상세" aria-hidden="true" onclick="if(event.target === this) closeBookingDetail()">
+    <div class="booking-detail-dialog">
+      <div class="booking-detail-body" id="bookingDetailContent"></div>
+    </div>
+  </div>
+
+  <!--
+    [추가] 결제·예매 UI 시작
+    수정자: wldnjs0653
+    수정일: 2026-09-16
+    설명:
+    좌석을 선점한 사용자가 결제수단을 선택하고 결제 처리 상태를 확인하는 영역이다.
+    결제가 완료되면 사용자가 선택한 구간·열차·좌석·결제수단·금액·예매번호를 표시한다.
+  -->
+  <div class="modal-backdrop" id="paymentModal" role="dialog" aria-modal="true" aria-labelledby="paymentTitle" aria-hidden="true">
+    <div class="payment-dialog">
+      <div id="paymentFormView">
+        <div class="payment-head">
+          <div><h2 id="paymentTitle">결제하기</h2><p>예약 정보를 확인하고 결제수단을 선택해주세요.</p></div>
+          <button class="modal-close" onclick="closePaymentModal()" aria-label="결제창 닫기">✕</button>
+        </div>
+        <div class="payment-body">
+          <div class="payment-summary">
+            <div class="route" id="payRoute">-</div>
+            <div class="seat" id="paySeat">-</div>
+            <div class="amount" id="payAmount">0원</div>
+          </div>
+          <div class="pay-section-title">결제수단</div>
+          <div class="payment-methods">
+            <label class="pay-method"><input type="radio" name="paymentMethod" value="신용·체크카드" onchange="syncPaymentMethodOptions()" checked><span><b class="pay-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5" width="19" height="14" rx="2.5"></rect><path d="M3 9h18M7 15h4"></path></svg></b>신용·체크카드</span></label>
+            <label class="pay-method"><input type="radio" name="paymentMethod" value="간편결제" onchange="syncPaymentMethodOptions()"><span><b class="pay-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="2.5"></rect><path d="M9 6h6M10 18h4"></path></svg></b>간편결제</span></label>
+            <label class="pay-method"><input type="radio" name="paymentMethod" value="계좌이체" onchange="syncPaymentMethodOptions()"><span><b class="pay-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9h18M5 9v8m4-8v8m6-8v8m4-8v8M3 19h18M12 3l9 4H3z"></path></svg></b>계좌이체</span></label>
+          </div>
+          <div class="card-options">
+            <select id="cardCompany" aria-label="카드사 선택">
+              <option value="">카드사 선택</option><option>국민카드</option><option>신한카드</option><option>삼성카드</option><option>현대카드</option><option>롯데카드</option>
+            </select>
+            <select id="installment" aria-label="할부 선택">
+              <option>일시불</option><option>2개월</option><option>3개월</option><option>6개월</option>
+            </select>
+          </div>
+          <label class="payment-agree"><input type="checkbox" id="paymentAgree"><span>예약 내역과 결제금액을 확인했으며, 결제 진행에 동의합니다.</span></label>
+          <button class="pay-submit" id="paySubmitBtn" onclick="confirmPayment()">결제하기</button>
+          <div class="pay-error" id="payError"></div>
+        </div>
+      </div>
+      <div class="payment-processing" id="paymentProcessingView">
+        <div class="pay-spinner"></div>
+        <h3 id="processingTitle">결제를 처리하고 있습니다</h3>
+        <p id="processingMessage">창을 닫거나 새로고침하지 마세요.<br>결제 승인 결과를 안전하게 확인하고 있습니다.</p>
+        <div class="process-steps"><span class="process-dot on"></span><span class="process-dot" id="paymentDoneDot"></span><span class="process-dot" id="notificationDoneDot"></span></div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Redis 대기열 사용자 화면 -->
+  <div class="queue-waiting-backdrop" id="queueWaitingModal"
+       role="dialog" aria-modal="true" aria-labelledby="queueWaitingTitle" aria-hidden="true">
+    <div class="queue-waiting-dialog">
+      <div class="queue-waiting-header">
+        <div class="queue-header-inner">
+          <div class="queue-waiting-brand">
+            <span class="queue-brand-mark">T</span>
+            <strong>TICKET RAIL</strong>
+          </div>
+          <nav aria-label="대기 화면 메뉴"><span class="active">열차 조회</span><span>이용안내</span><span>고객센터</span></nav>
+          <div class="queue-user-links"><span>내 승차권</span><span>로그아웃</span></div>
+        </div>
+      </div>
+      <div class="queue-waiting-body">
+        <div class="queue-booking-steps" aria-label="예매 진행 단계">
+          <div class="done"><b>✓</b><span>열차 선택</span></div>
+          <i></i>
+          <div class="current"><b>2</b><span>좌석 선택</span></div>
+          <i></i>
+          <div><b>3</b><span>결제</span></div>
+          <i></i>
+          <div><b>4</b><span>예매 완료</span></div>
+        </div>
+
+        <section class="queue-card">
+          <div class="queue-title-row">
+            <span class="queue-clock" aria-hidden="true"></span>
+            <div><h2 id="queueWaitingTitle">접속 대기 중입니다</h2><p>현재 접속자가 많아 순서대로 안내하고 있습니다.</p></div>
+            <div class="queue-spinner" id="queueSpinner" aria-hidden="true"></div>
+          </div>
+
+          <div class="queue-progress" aria-label="대기 진행률"><span id="queueProgressBar"></span></div>
+
+          <div class="queue-stats">
+            <p class="queue-position"><span>현재 대기순번</span><strong><em id="queuePosition">-</em>명</strong></p>
+            <p class="queue-estimate"><span>예상 대기시간</span><strong id="queueEstimate">계산 중</strong></p>
+          </div>
+
+          <div class="queue-train-summary">
+            <span class="queue-train-type">KTX</span>
+            <div><strong id="queueTrainName">선택한 열차</strong><p id="queueTrainRoute">선택한 운행 구간</p><span id="queueTrainDate">출발일 확인 중</span></div>
+          </div>
+
+          <p class="queue-message" id="queueMessage" role="status" aria-live="polite">
+            <strong>순서가 되면 예매 화면으로 자동 이동합니다.</strong><br>
+            <span>새로고침하지 않고 잠시만 기다려 주세요.</span>
+          </p>
+          <button class="queue-cancel" type="button" onclick="cancelQueueWaiting()">대기 취소</button>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="completionModal" role="dialog" aria-modal="true" aria-labelledby="completionTitle" aria-hidden="true">
+    <div class="complete-dialog">
+      <div class="complete-check">✓</div>
+      <h2 id="completionTitle">결제 및 예매가 완료되었습니다</h2>
+      <p>등록된 알림 채널로 예매 확정 안내를 전송했습니다.</p>
+      <div class="complete-details" id="completionDetails"></div>
+      <button class="pay-submit" onclick="closeCompletionModal()">승차권 확인</button>
+    </div>
+  </div>
+
+  <div class="payment-toast" id="paymentToast" role="status" aria-live="polite">
+    <div class="ico">✓</div><div><strong>예매 확정 알림</strong><p id="paymentToastMessage"></p></div>
+  </div>
+  <!-- [추가] 결제·예매 UI 끝 / 수정자: wldnjs0653 / 수정일: 2026-09-16 -->
+
+  <script src="payment-status.js"></script>
+  <script>
+    // ─────────────────────────────────────────────────────────────
+    // 실제 백엔드 API 연동 사용자 화면
+    //
+    // 흐름 : 대기열 진입 → 입장 인증 → 좌석 조회 → 좌석 선점 → 예매 확정 → 조회
+    // 백엔드가 admitted 상태가 아니면 hold를 403으로 막으므로,
+    // 열차를 선택하는 시점에 queue/join + auth/verify를 먼저 태운다.
+    //
+    // 로그인 기능은 프로젝트 범위 밖이라 user_id는 app_user에 존재하는
+    // 테스트 계정 id(1)로 고정한다.
+    // ─────────────────────────────────────────────────────────────
+    const API = '';          // 같은 origin에서 정적 파일이 제공되므로 빈 문자열
+    const USER_ID = 1;
+    const LOCAL_PREVIEW = window.location.protocol === 'file:'
+      || new URLSearchParams(window.location.search).get('preview') === '1';
+
+    // HTML 파일을 직접 열어도 디자인과 전체 예매 흐름을 확인할 수 있는 미리보기 데이터다.
+    // HTTP/HTTPS 환경에서는 이 데이터를 사용하지 않고 실제 API만 호출한다.
+    const PREVIEW_EVENTS = [
+      ['KTX 101 서울-부산', '2026-10-07T06:00:00+09:00', '2026-10-07T08:32:00+09:00', 120],
+      ['KTX 103 서울-부산', '2026-10-07T08:00:00+09:00', '2026-10-07T10:34:00+09:00', 85],
+      ['KTX 105 서울-부산', '2026-10-07T10:00:00+09:00', '2026-10-07T12:37:00+09:00', 32],
+      ['KTX 107 서울-부산', '2026-10-07T12:00:00+09:00', '2026-10-07T14:28:00+09:00', 0],
+      ['KTX 109 서울-부산', '2026-10-07T14:00:00+09:00', '2026-10-07T16:36:00+09:00', 45],
+      ['KTX 111 서울-부산', '2026-10-07T16:00:00+09:00', '2026-10-07T18:32:00+09:00', 138],
+      ['KTX 113 서울-부산', '2026-10-07T18:00:00+09:00', '2026-10-07T20:35:00+09:00', 76],
+      ['KTX 115 서울-부산', '2026-10-07T20:00:00+09:00', '2026-10-07T22:31:00+09:00', 19],
+      ['KTX 201 서울-대전', '2026-10-07T09:30:00+09:00', '2026-10-07T10:32:00+09:00', 45, 23700],
+      ['ITX-새마을 1001 서울-부산', '2026-10-07T07:30:00+09:00', '2026-10-07T12:20:00+09:00', 68, 42600],
+      ['무궁화호 1201 서울-부산', '2026-10-07T09:15:00+09:00', '2026-10-07T14:48:00+09:00', 91, 28600],
+      ['ITX-새마을 1003 서울-부산', '2026-10-07T15:20:00+09:00', '2026-10-07T20:08:00+09:00', 54, 42600],
+      ['무궁화호 1203 서울-부산', '2026-10-07T17:10:00+09:00', '2026-10-07T22:42:00+09:00', 73, 28600],
+      ['ITX-새마을 1021 서울-대전', '2026-10-07T07:20:00+09:00', '2026-10-07T08:58:00+09:00', 64, 16000],
+      ['무궁화호 1221 서울-대전', '2026-10-07T11:10:00+09:00', '2026-10-07T13:07:00+09:00', 112, 10800],
+      ['ITX-새마을 1023 서울-대전', '2026-10-07T15:10:00+09:00', '2026-10-07T16:48:00+09:00', 48, 16000],
+      ['무궁화호 1223 서울-대전', '2026-10-07T18:20:00+09:00', '2026-10-07T20:18:00+09:00', 87, 10800],
+      ['KTX 301 서울-대구', '2026-10-07T10:10:00+09:00', '2026-10-07T11:58:00+09:00', 72, 43500],
+      ['ITX-새마을 1031 서울-대구', '2026-10-07T07:40:00+09:00', '2026-10-07T10:45:00+09:00', 83, 31400],
+      ['무궁화호 1231 서울-대구', '2026-10-07T11:20:00+09:00', '2026-10-07T14:54:00+09:00', 105, 21400],
+      ['ITX-새마을 1033 서울-대구', '2026-10-07T15:30:00+09:00', '2026-10-07T18:34:00+09:00', 57, 31400],
+      ['무궁화호 1233 서울-대구', '2026-10-07T18:10:00+09:00', '2026-10-07T21:45:00+09:00', 78, 21400],
+      ['KTX 401 서울-광주', '2026-10-07T08:25:00+09:00', '2026-10-07T10:19:00+09:00', 66, 47100],
+      ['ITX-새마을 1041 서울-광주', '2026-10-07T13:00:00+09:00', '2026-10-07T16:32:00+09:00', 74, 33000],
+      ['무궁화호 1241 서울-광주', '2026-10-07T18:10:00+09:00', '2026-10-07T22:12:00+09:00', 98, 22900],
+      ['ITX-새마을 1051 서울-전주', '2026-10-07T10:30:00+09:00', '2026-10-07T13:22:00+09:00', 69, 27600],
+      ['무궁화호 1251 서울-전주', '2026-10-07T16:40:00+09:00', '2026-10-07T20:01:00+09:00', 116, 18700],
+    ].map((row, index) => ({
+      id: index + 1,
+      title: row[0],
+      opens_at: row[1],
+      closes_at: row[2],
+      min_price: row[4] || 59800,
+      standard_price: row[4] || 59800,
+      first_price: Math.round((row[4] || 59800) * 1.4 / 100) * 100,
+      available_seats: row[3],
+      total_seats: 200,
+    }));
+
+    let trains = [];
+
+    function trainType(title) {
+      if (title.startsWith('KTX')) return 'ktx';
+      if (title.startsWith('ITX')) return 'itx';
+      if (title.startsWith('무궁화')) return 'mugunghwa';
+      return 'etc';
+    }
+
+    // "KTX 101 서울-부산" 형태의 title 을 열차명과 구간으로 나눈다.
+    function parseTitle(title) {
+      const parts = title.trim().split(' ');
+      const route = parts.length > 1 ? parts[parts.length - 1] : '';
+      const name = parts.slice(0, -1).join(' ') || title;
+      const [dep, arr] = route.split('-');
+      return { name, depStation: dep || '', arrStation: arr || '' };
+    }
+
+    function hhmm(iso) {
+      return new Date(iso).toLocaleTimeString('ko-KR', {
+        hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Seoul',
+      });
+    }
+
+    function serviceDate(iso) {
+      return new Intl.DateTimeFormat('en-CA', {
+        year: 'numeric', month: '2-digit', day: '2-digit', timeZone: 'Asia/Seoul',
+      }).format(new Date(iso));
+    }
+
+    function duration(a, b) {
+      const min = Math.round((new Date(b) - new Date(a)) / 60000);
+      const h = Math.floor(min / 60);
+      const m = min % 60;
+      return h > 0 ? `${h}시간 ${m}분` : `${m}분`;
+    }
+
+    // GET /events 응답을 화면이 쓰는 형태로 변환한다.
+    // title 의 구간("서울-광주" 등)을 파싱해 depStation/arrStation 으로 보관하고,
+    // 조회 시 이 값으로 출발·도착 드롭다운 선택과 매칭한다.
+    async function loadTrains(date) {
+      let data;
+      if (LOCAL_PREVIEW) {
+        data = { events: PREVIEW_EVENTS.map(event => {
+          const offset = Date.parse(`${date}T00:00:00Z`) - Date.parse(`${serviceDate(event.opens_at)}T00:00:00Z`);
+          return {
+            ...event,
+            opens_at: new Date(Date.parse(event.opens_at) + offset).toISOString(),
+            closes_at: new Date(Date.parse(event.closes_at) + offset).toISOString(),
+          };
+        }) };
+      } else {
+        const res = await fetch(`${API}/events?date=${encodeURIComponent(date)}`, { cache: 'no-store' });
+        if (!res.ok) throw new Error(`events API ${res.status}`);
+        data = await res.json();
+      }
+      return (data.events || []).map(e => {
+        const t = parseTitle(e.title);
+        return {
+          eventId: e.id,
+          name: t.name,
+          type: trainType(e.title),
+          depStation: t.depStation,
+          arrStation: t.arrStation,
+          serviceDate: serviceDate(e.opens_at),
+          dep: hhmm(e.opens_at),
+          arr: hhmm(e.closes_at),
+          dur: duration(e.opens_at, e.closes_at),
+          price: Number(e.min_price),
+          stdPrice: e.standard_price != null ? Number(e.standard_price) : null,
+          firstPrice: e.first_price != null ? Number(e.first_price) : null,
+          available: Number(e.available_seats),
+          total: Number(e.total_seats),
+          live: true,
+        };
+      });
+    }
+
+    let selectedTrain = null;
+    let seats = [];
+    let selectedSeat = null;
+    let selectedCoach = 2;
+    const COACH_COUNT = 5;
+    let stressDemoRunning = false;
+    let previewStressHoldCount = 0;
+    let queueToken = null;
+    let admitted = false;
+    let holdData = null;
+    let bookingData = null;
+    let historyBookingItems = [];
+    let paymentInProgress = false;
+    let paymentMethod = '신용·체크카드';
+    let paymentToastTimer = null;
+    let paymentTracker = null;
+    let notificationTracker = null;
+    const notifiedBookingIds = new Set();
+    const PAYMENT_SESSION_KEY = 'ticketrail_pending_payment';
+
+    function rememberPendingPayment() {
+      if (!bookingData) return;
+      try { sessionStorage.setItem(PAYMENT_SESSION_KEY, JSON.stringify({ userId: USER_ID, booking: bookingData })); } catch { /* 저장 불가 환경 */ }
+    }
+
+    function forgetPendingPayment() {
+      try { sessionStorage.removeItem(PAYMENT_SESSION_KEY); } catch { /* 저장 불가 환경 */ }
+    }
+
+    function paymentState() {
+      return TicketRailPaymentStatus.classifyPayment(bookingData?.payment, bookingData?.bookingId);
+    }
+
+    function formatPaymentElapsed(milliseconds) {
+      const seconds = Math.floor(Math.max(0, milliseconds) / 1000);
+      return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+    }
+
+    function startPaymentStatusPolling(immediate = false) {
+      if (!bookingData) return;
+      paymentTracker?.stop();
+      notificationTracker?.stop();
+      clearTimeout(paymentToastTimer);
+      document.getElementById('paymentToast').className = 'payment-toast';
+      paymentTracker = TicketRailPaymentStatus.createPaymentTracker({
+        async readPayment(bookingId, signal) {
+          // 실제 운영에서는 저장된 승인 결과만 사용하며, 404/통신 실패는 대기로 유지한다.
+          if (LOCAL_PREVIEW) {
+            await new Promise(resolve => setTimeout(resolve, 700));
+            return { booking_id: bookingId, status: 'APPROVED', amount: bookingData?.seat?.price || 59800, notification_sent: true };
+          }
+          const response = await fetch(`${API}/payments/${bookingId}`, { signal, cache: 'no-store' });
+          if (!response.ok) return null;
+          return response.json();
+        },
+        onPending() { closePaymentModal(true); hideBanner(); showTicketResult(); },
+        onTick(elapsed) {
+          const display = document.getElementById('paymentElapsed');
+          if (display) display.textContent = formatPaymentElapsed(elapsed);
+        },
+        onChecking(checking) {
+          const button = document.getElementById('paymentCheckBtn');
+          button.disabled = checking;
+          button.textContent = checking ? '상태 확인 중…' : '상태 다시 확인';
+        },
+        onApproved(payment) {
+          bookingData.payment = payment;
+          bookingData.paymentMethod = paymentMethod;
+          paymentInProgress = false;
+          forgetPendingPayment();
+          closePaymentModal(true);
+          hideBanner();
+          showTicketResult();
+          addLog('GET', `/payments/${bookingData.bookingId}`, 200, '결제 승인 완료');
+          startNotificationStatusPolling(payment);
+        },
+        onFailed(payment) {
+          bookingData.payment = payment;
+          paymentInProgress = false;
+          forgetPendingPayment();
+          closePaymentModal(true);
+          hideBanner();
+          showTicketResult();
+        },
+      });
+      paymentTracker.start(bookingData.bookingId, { immediate, startedAt: bookingData.paymentStartedAt });
+    }
+
+    function checkPaymentNow() { return paymentTracker?.checkNow(); }
+
+    function startNotificationStatusPolling(payment) {
+      notificationTracker?.stop();
+      if (paymentState() !== 'approved' || notifiedBookingIds.has(bookingData.bookingId)) return;
+      notificationTracker = TicketRailPaymentStatus.createNotificationTracker({
+        async readPayment(bookingId, signal) {
+          const response = await fetch(`${API}/payments/${bookingId}`, { signal, cache: 'no-store' });
+          return response.ok ? response.json() : null;
+        },
+        onConfirmed: showPaymentToast,
+      });
+      notificationTracker.start(bookingData.bookingId, payment);
+    }
+
+    function viewApprovedTicket() {
+      if (paymentState() !== 'approved') return;
+      showBookingHistory();
+      openBookingDetail(0);
+    }
+
+    function resumePendingPayment() {
+      try {
+        const stored = JSON.parse(sessionStorage.getItem(PAYMENT_SESSION_KEY) || 'null');
+        const booking = stored?.booking;
+        if (!stored || stored.userId !== USER_ID || !Number.isSafeInteger(Number(booking?.bookingId)) || Number(booking.bookingId) <= 0 || !booking.train || !booking.seat || !Number.isFinite(booking.paymentStartedAt) || Date.now() - booking.paymentStartedAt > 86400000) return false;
+        bookingData = booking;
+        bookingData.payment = null; // 브라우저 저장값은 승인 근거가 아니다. 항상 서버에서 재확인한다.
+        paymentMethod = booking.paymentMethod || paymentMethod;
+        paymentInProgress = true;
+        startPaymentStatusPolling(true);
+        return true;
+      } catch { return false; }
+    }
+
+    const QUEUE_SESSION_KEY = 'ticketing_queue_session';
+    let queuePollTimer = null;
+    let queuePollInFlight = false;
+    let queueInitialPosition = 1;
+
+    function writeQueueSession(value) {
+      try { sessionStorage.setItem(QUEUE_SESSION_KEY, JSON.stringify(value)); } catch { /* 저장 불가 환경 */ }
+    }
+
+    function readQueueSession() {
+      try {
+        const raw = sessionStorage.getItem(QUEUE_SESSION_KEY);
+        return raw ? JSON.parse(raw) : null;
+      } catch {
+        return null;
+      }
+    }
+
+    function clearQueueSession() {
+      try { sessionStorage.removeItem(QUEUE_SESSION_KEY); } catch { /* 저장 불가 환경 */ }
+    }
+
+    function queueEstimateLabel(position) {
+      const current = Math.max(0, Number(position || 0));
+      if (current === 0) return '곧 입장';
+      return `약 ${Math.max(1, Math.ceil(current / 180))}분`;
+    }
+
+    function selectedTripDateLabel() {
+      const value = document.getElementById('tripDate').value;
+      if (!value) return '출발일 확인 중';
+      return new Date(`${value}T00:00:00`).toLocaleDateString('ko-KR', {
+        year: 'numeric', month: 'long', day: 'numeric', weekday: 'short',
+      });
+    }
+
+    function showQueueWaiting(session) {
+      queueInitialPosition = Math.max(1, Number(session.position || 1));
+      document.getElementById('queueTrainName').textContent =
+        session.train && session.train.name ? session.train.name : '선택한 열차';
+      document.getElementById('queueTrainRoute').textContent = session.train
+        ? `${session.train.depStation} ${session.train.dep} → ${session.train.arrStation} ${session.train.arr}`
+        : '선택한 운행 구간';
+      document.getElementById('queueTrainDate').textContent = selectedTripDateLabel();
+      document.getElementById('queuePosition').textContent = queueInitialPosition.toLocaleString();
+      document.getElementById('queueEstimate').textContent = queueEstimateLabel(queueInitialPosition);
+      document.getElementById('queueProgressBar').style.width = '8%';
+      document.getElementById('queueSpinner').style.display = 'block';
+      document.getElementById('queueMessage').innerHTML =
+        '<strong>순서가 되면 예매 화면으로 자동 이동합니다.</strong><br><span>새로고침하지 않고 잠시만 기다려 주세요.</span>';
+      const modal = document.getElementById('queueWaitingModal');
+      modal.classList.add('show');
+      modal.setAttribute('aria-hidden', 'false');
+    }
+
+    function hideQueueWaiting() {
+      const modal = document.getElementById('queueWaitingModal');
+      modal.classList.remove('show');
+      modal.setAttribute('aria-hidden', 'true');
+    }
+
+    function updateQueueWaiting(status) {
+      const current = Math.max(1, Number(status.waiting_position || queueInitialPosition));
+      const completed = Math.max(0, queueInitialPosition - current);
+      const progress = queueInitialPosition <= 1
+        ? 8
+        : Math.min(96, Math.max(8, 8 + (completed / (queueInitialPosition - 1)) * 88));
+
+      document.getElementById('queuePosition').textContent = current.toLocaleString();
+      document.getElementById('queueEstimate').textContent = queueEstimateLabel(current);
+      document.getElementById('queueProgressBar').style.width = `${progress}%`;
+      document.getElementById('queueMessage').innerHTML =
+        '<strong>순서가 되면 예매 화면으로 자동 이동합니다.</strong><br><span>새로고침하지 않고 잠시만 기다려 주세요.</span>';
+    }
+
+    function scheduleQueuePoll(seconds) {
+      clearTimeout(queuePollTimer);
+      const delay = Math.max(1, Number(seconds || 2)) * 1000;
+      queuePollTimer = setTimeout(pollQueueAdmission, delay);
+    }
+
+    async function finishQueueAdmission(session, response) {
+      admitted = true;
+      queueToken = session.token;
+      selectedTrain = session.train;
+      clearQueueSession();
+      document.getElementById('queuePosition').textContent = '0';
+      document.getElementById('queueEstimate').textContent = '곧 입장';
+      document.getElementById('queueProgressBar').style.width = '100%';
+      document.getElementById('queueSpinner').style.display = 'none';
+      document.getElementById('queueMessage').innerHTML =
+        '<strong style="color:var(--green)">예매 페이지에 입장했습니다.</strong><br><span>좌석 선택 화면으로 이동합니다.</span>';
+
+      await new Promise(resolve => setTimeout(resolve, 450));
+      hideQueueWaiting();
+      document.body.className = 'view-seats';
+      document.getElementById('trainListSection').style.display = 'none';
+      setStep(2);
+      selectedCoach = 2;
+      selectedSeat = null;
+      holdData = null;
+      document.getElementById('selSeatInfo').textContent = '좌석을 선택해주세요';
+      document.getElementById('selSeatInfo').className = 'sel-seat-info';
+      resetSeatButtons();
+      syncCoachTabs();
+      await loadSeats(selectedTrain.eventId);
+      document.getElementById('seatSelectCard').style.display = 'block';
+      document.getElementById('seatSelectTitle').textContent = selectedTrain.name;
+      document.getElementById('seatRouteSummary').textContent =
+        `${selectedTripDateLabel()} · ${selectedTrain.depStation} ${selectedTrain.dep} → ${selectedTrain.arrStation} ${selectedTrain.arr}`;
+      const fare = Number(selectedTrain.stdPrice ?? selectedTrain.price).toLocaleString() + '원';
+      document.getElementById('seatFareSummary').textContent = fare;
+      document.getElementById('seatOrderPrice').textContent = fare;
+      document.getElementById('seatOrderTotal').textContent = fare;
+      showBanner('success', '예매 페이지에 입장했습니다. 원하는 좌석을 선택해주세요.');
+    }
+
+    async function pollQueueAdmission() {
+      if (queuePollInFlight) return;
+      const session = readQueueSession();
+      if (!session || !session.token || !session.eventId) {
+        hideQueueWaiting();
+        return;
+      }
+
+      queuePollInFlight = true;
+      const response = await call('POST', '/auth/verify', {
+        body: { event_id: session.eventId, token: session.token },
+      });
+      queuePollInFlight = false;
+
+      if (response.status === 200 && response.body && response.body.status === 'admitted') {
+        await finishQueueAdmission(session, response.body);
+        return;
+      }
+
+      if (response.status === 202 && response.body && response.body.status === 'waiting') {
+        updateQueueWaiting(response.body);
+        scheduleQueuePoll(response.body.retry_after_seconds);
+        return;
+      }
+
+      if (response.status === 401) {
+        clearQueueSession();
+        document.getElementById('queueSpinner').style.display = 'none';
+        document.getElementById('queueMessage').innerHTML =
+          '<strong style="color:#c43232">대기 토큰이 만료되었습니다.</strong><br>대기를 취소하고 열차를 다시 선택해주세요.';
+        return;
+      }
+
+      document.getElementById('queueMessage').innerHTML =
+        '서버 연결을 다시 확인하고 있습니다.<br>잠시 후 자동으로 재시도합니다.';
+      scheduleQueuePoll(3);
+    }
+
+    async function startQueueWaiting(train, queueResponse) {
+      const session = {
+        eventId: train.eventId,
+        token: queueResponse.token,
+        position: queueResponse.position,
+        train,
+      };
+      queueToken = queueResponse.token;
+      selectedTrain = train;
+      writeQueueSession(session);
+      showQueueWaiting(session);
+      await pollQueueAdmission();
+    }
+
+    async function cancelQueueWaiting() {
+      clearTimeout(queuePollTimer);
+      const session = readQueueSession();
+      if (session && session.eventId && session.token) {
+        await call('POST', '/queue/leave', {
+          body: { event_id: session.eventId, token: session.token },
+        });
+      }
+      clearQueueSession();
+      hideQueueWaiting();
+      queueToken = null;
+      admitted = false;
+      selectedTrain = null;
+      document.querySelectorAll('.train-item').forEach(item => item.classList.remove('selected'));
+      setStep(1);
+      showBanner('success', '접속 대기를 취소했습니다.');
+    }
+
+    async function releaseCurrentQueueAccess() {
+      if (!selectedTrain || !queueToken) return;
+      await call('POST', '/queue/leave', {
+        body: { event_id: selectedTrain.eventId, token: queueToken },
+      });
+      queueToken = null;
+      admitted = false;
+    }
+
+    function resumeQueueWaiting() {
+      const session = readQueueSession();
+      if (!session || !session.token || !session.eventId || !session.train) return;
+      selectedTrain = session.train;
+      queueToken = session.token;
+      setStep(2);
+      showQueueWaiting(session);
+      pollQueueAdmission();
+    }
+
+
+    // ── 공통 유틸 ──────────────────────────────────────────────
+
+    let bannerTimer = null;
+    function showBanner(type, msg, holdMs = 5000) {
+      const el = document.getElementById('banner');
+      document.getElementById('bannerMsg').textContent = msg;
+      el.className = `banner show ${type}`;
+      clearTimeout(bannerTimer);
+      if (holdMs > 0) bannerTimer = setTimeout(hideBanner, holdMs);
+    }
+    function hideBanner() {
+      document.getElementById('banner').className = 'banner';
+    }
+
+    function newKey(prefix) {
+      const rand = (crypto.randomUUID && crypto.randomUUID().slice(0, 8))
+        || Math.random().toString(36).slice(2, 10);
+      return `${prefix}-${Date.now()}-${rand}`;
+    }
+
+    let previewVerifyAttempts = 0;
+
+    function previewSeats() {
+      const columns = ['A', 'B', 'C', 'D'];
+      const bookedByCoach = {
+        1: [1, 7, 16, 31],
+        2: [2, 8, 18, 35],
+        3: [0, 11, 24, 38],
+        4: [1, 12, 25, 34],
+        5: [4, 17, 29, 37],
+      };
+      return Array.from({ length: 200 }, (_, index) => ({
+        id: index + 1,
+        coach_no: Math.floor(index / 40) + 1,
+        seat_code: `${Math.floor((index % 40) / 4) + 1}${columns[index % 4]}`,
+        grade: 'STANDARD',
+        price: selectedTrain?.price || 59800,
+        version: 1,
+        status: bookedByCoach[Math.floor(index / 40) + 1].includes(index % 40) ? 'BOOKED' : 'AVAILABLE',
+      }));
+    }
+
+    async function previewApi(method, path) {
+      await new Promise(resolve => setTimeout(resolve, 180));
+      if (method === 'POST' && path === '/queue/join') {
+        previewVerifyAttempts = 0;
+        return { ok: true, status: 200, body: { token: 'preview-queue-token', position: 328 } };
+      }
+      if (method === 'POST' && path === '/auth/verify') {
+        previewVerifyAttempts += 1;
+        if (previewVerifyAttempts < 2) {
+          return { ok: true, status: 202, body: { status: 'waiting', waiting_position: 126, retry_after_seconds: 1 } };
+        }
+        return { ok: true, status: 200, body: { status: 'admitted' } };
+      }
+      if (method === 'GET' && /^\/seats\/\d+$/.test(path)) {
+        return { ok: true, status: 200, body: { seats: previewSeats() } };
+      }
+      if (method === 'POST' && /^\/seats\/\d+\/hold$/.test(path)) {
+        if (stressDemoRunning) {
+          const attempt = previewStressHoldCount++;
+          if (attempt > 0) return { ok: false, status: 409, body: { error: 'seat_already_held' } };
+        }
+        return { ok: true, status: 200, body: { hold_ttl_seconds: 180 } };
+      }
+      if (method === 'POST' && path === '/bookings') {
+        return { ok: true, status: 201, body: { booking_id: 'TR20261007123456', status: 'confirmed' } };
+      }
+      if (method === 'POST' && path === '/queue/leave') {
+        return { ok: true, status: 200, body: { status: 'released' } };
+      }
+      if (method === 'GET' && /^\/bookings\//.test(path)) {
+        return { ok: true, status: 200, body: { status: 'confirmed', seats: [holdData?.seat].filter(Boolean) } };
+      }
+      if (method === 'GET' && /^\/payments\//.test(path)) {
+        return { ok: true, status: 200, body: { status: 'approved', amount: holdData?.seat?.price || 59800, notification_sent: true } };
+      }
+      return { ok: false, status: 404, body: { error: 'preview route not found' } };
+    }
+
+    async function call(method, path, { body, idemPrefix, idemKey } = {}) {
+      if (LOCAL_PREVIEW) {
+        const result = await previewApi(method, path);
+        addLog(method, path, result.status, summarize(result.body));
+        return result;
+      }
+      const headers = {};
+      const opts = { method };
+      if (body) {
+        headers['Content-Type'] = 'application/json';
+        opts.body = JSON.stringify(body);
+      }
+      if (idemPrefix) headers['Idempotency-Key'] = idemKey || newKey(idemPrefix);
+      opts.headers = headers;
+
+      try {
+        const res = await fetch(`${API}${path}`, opts);
+        let json = null;
+        try { json = await res.json(); } catch { /* 본문 없음 */ }
+        addLog(method, path, res.status, summarize(json));
+        return { ok: res.ok, status: res.status, body: json };
+      } catch (err) {
+        addLog(method, path, 0, `network error: ${err.message}`);
+        return { ok: false, status: 0, body: null };
+      }
+    }
+
+
+    async function callWithTransientRetry(method, path, options = {}, retries = 3) {
+      const retryOptions = { ...options };
+      if (retryOptions.idemPrefix && !retryOptions.idemKey) {
+        retryOptions.idemKey = newKey(retryOptions.idemPrefix);
+      }
+
+      const delays = [100, 250, 500];
+      let result;
+
+      for (let attempt = 0; attempt <= retries; attempt += 1) {
+        result = await call(method, path, retryOptions);
+
+        if (result.ok || ![0, 502, 503, 504].includes(result.status)) {
+          return result;
+        }
+
+        if (attempt < retries) {
+          await new Promise(resolve => setTimeout(
+            resolve,
+            delays[Math.min(attempt, delays.length - 1)]
+          ));
+        }
+      }
+
+      return result;
+    }
+
+    function summarize(json) {
+      if (!json) return '';
+      if (json.error) return json.error;
+      if (json.booking_id) return `booking_id=${json.booking_id} ${json.status || ''}`;
+      if (json.seats) return `${json.seats.length}건`;
+      if (json.token) return `token=${String(json.token).slice(0, 8)}...`;
+      if (json.status) return json.status;
+      return '';
+    }
+
+    function addLog(method, path, status, detail) {
+      const panel = document.getElementById('logPanel');
+      if (!panel) return;
+      const now = new Date().toTimeString().slice(0, 8);
+      const mc = method === 'GET' ? 'get' : 'post';
+      const sc = status >= 200 && status < 400 ? 'ok' : 'err';
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      entry.innerHTML = `<span style="color:#54688a">${now}</span> <span class="m ${mc}">${method}</span> ${path} → <span class="s ${sc}">${status || 'ERR'}</span> ${detail || ''}`;
+      panel.prepend(entry);
+    }
+
+    function setStep(num) {
+      const uiStep = num >= 4 ? 4 : num;
+      document.querySelectorAll('.step').forEach(el => {
+        const n = parseInt(el.dataset.step, 10);
+        el.className = 'step' + (n === uiStep ? ' active' : n < uiStep ? ' done' : '');
+      });
+    }
+
+
+    function swapStations() {
+      const f = document.getElementById('fromStation');
+      const t = document.getElementById('toStation');
+      [f.value, t.value] = [t.value, f.value];
+    }
+
+    // ── 헬스체크 ──────────────────────────────────────────────
+
+    async function checkHealth() {
+      const dot = document.getElementById('healthDot');
+      const label = document.getElementById('healthLabel');
+      if (!dot || !label) return;
+      try {
+        const res = await fetch(`${API}/health/ready`);
+        if (res.ok) { dot.className = 'health-dot ok'; label.textContent = '원활'; }
+        else { dot.className = 'health-dot fail'; label.textContent = '일부 기능 확인 중'; }
+      } catch {
+        dot.className = 'health-dot unknown'; label.textContent = '연결 확인 중';
+      }
+    }
+
+    // ── 1) 열차 조회 ──────────────────────────────────────────
+
+    let trainSearchSequence = 0;
+
+    function openDepartureCalendar() {
+      const input = document.getElementById('tripDate');
+      if (typeof input.showPicker === 'function') {
+        try { input.showPicker(); } catch { input.focus(); }
+      } else {
+        input.focus();
+      }
+    }
+
+    async function searchTrains() {
+      const sequence = ++trainSearchSequence;
+      const from = document.getElementById('fromStation').value;
+      const to = document.getElementById('toStation').value;
+      const date = document.getElementById('tripDate').value;
+      const pax = parseInt(document.getElementById('paxCount').value, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        showBanner('error', '출발일을 선택해주세요.');
+        return;
+      }
+      setStep(1);
+      try {
+        const loaded = await loadTrains(date);
+        if (sequence !== trainSearchSequence) return;
+        trains = loaded;
+      } catch {
+        if (sequence !== trainSearchSequence) return;
+        showBanner('error', '열차 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.');
+        return;
+      }
+      document.body.className = 'view-results';
+      document.getElementById('introCard')?.style.setProperty('display', 'none');
+      hideBanner();
+
+      if (pax > 1) {
+        showBanner('info', '다중 좌석 예매는 준비 중입니다. 이번 예매는 1석 기준으로 진행됩니다.');
+      }
+
+      // 선택한 출발·도착 구간과 일치하는 열차만 남긴다.
+      const matched = trains
+        .filter(t => t.depStation === from && t.arrStation === to && t.serviceDate === date)
+        .sort((a, b) => a.dep.localeCompare(b.dep));
+      const typeCounts = matched.reduce((counts, train) => {
+        counts[train.type] = (counts[train.type] || 0) + 1;
+        return counts;
+      }, {});
+      const tabLabels = {
+        all: `전체 (${matched.length})`,
+        ktx: `KTX (${typeCounts.ktx || 0})`,
+        itx: `ITX-새마을 (${typeCounts.itx || 0})`,
+        mugunghwa: `무궁화호 (${typeCounts.mugunghwa || 0})`,
+      };
+      document.querySelectorAll('.train-tabs [data-train-type]').forEach(button => {
+        button.textContent = tabLabels[button.dataset.trainType];
+      });
+
+      document.getElementById('searchSummary').innerHTML =
+         `<b>${from} &nbsp;→&nbsp; ${to}</b><span class="summary-meta"><span>${date}</span><span>성인 ${pax}명</span></span>`;
+
+      const list = document.getElementById('trainList');
+      list.innerHTML = '';
+      list.className = 'train-list';
+
+      if (matched.length === 0) {
+        list.className = '';
+        list.innerHTML = `<div class="no-route">${date} ${from} → ${to} 구간에 운행 중인 열차가 없습니다.<br>다른 구간을 선택해주세요.</div>`;
+        document.getElementById('trainListSection').style.display = 'block';
+        return;
+      }
+
+      matched.forEach(t => {
+        const item = document.createElement('div');
+        item.className = 'train-item';
+        item.dataset.trainType = t.type;
+        if (t.available <= 0) item.classList.add('soldout');
+        if (!t.live) item.style.opacity = '0.55';
+
+        // 잔여율에 따라 색으로 상태를 보여준다 : 40% 이상 여유 / 15% 이상 보통 / 미만 임박
+        const ratio = t.total > 0 ? t.available / t.total : 0;
+        const remainCls = ratio >= 0.4 ? 'wide' : ratio >= 0.15 ? 'mid' : 'few';
+
+        item.innerHTML = `
+          <div class="train-top">
+            <span class="train-name">${t.name}</span>
+            <span class="train-badge ${t.type}">${t.type.toUpperCase()}</span>
+          </div>
+          <div class="train-time-row">
+            <div class="train-time"><div class="time">${t.dep}</div><div class="station">${from}</div></div>
+            <div class="train-duration" aria-hidden="true">→</div>
+            <div class="train-time"><div class="time">${t.arr}</div><div class="station">${to}</div></div>
+          </div>
+          <div class="train-run-time">${t.dur}</div>
+          <div class="train-bottom">
+            <div class="fare">
+              <div class="fare-row">
+                <span class="cls">일반실</span>
+                <span class="amt">${(t.stdPrice ?? t.price).toLocaleString()}원</span>
+              </div>
+              <div class="fare-row first">
+                <span class="cls">특실</span>
+                ${t.firstPrice
+                  ? `<span class="amt">${t.firstPrice.toLocaleString()}원</span>`
+                  : `<span class="amt none">운행 없음</span>`}
+              </div>
+            </div>
+            <div class="seat-remain ${remainCls}">잔여 ${t.available}석 <small>/ ${t.total}석</small></div>
+          </div>
+        `;
+        if (t.live && t.available > 0) item.onclick = () => selectTrain(t, item);
+        list.appendChild(item);
+      });
+
+      const initialType = 'all';
+      const initialButton = document.querySelector(`.train-tabs [data-train-type="${initialType}"]`);
+      filterTrainType(initialType, initialButton);
+
+      document.getElementById('trainListSection').style.display = 'block';
+    }
+
+    function filterTrainType(type, button) {
+      document.querySelectorAll('.train-tabs [data-train-type]').forEach(tab => {
+        tab.classList.toggle('active', tab === button);
+      });
+      document.querySelectorAll('#trainList .train-item').forEach(item => {
+        item.style.display = type === 'all' || item.dataset.trainType === type ? 'grid' : 'none';
+      });
+    }
+
+    function showHomeView() {
+      document.body.className = '';
+      document.getElementById('trainListSection').style.display = 'none';
+      document.getElementById('seatSelectCard').style.display = 'none';
+      document.getElementById('resultCard').style.display = 'none';
+      document.getElementById('introCard')?.style.removeProperty('display');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    // ── 2) 열차 선택 → 대기열 진입 → 입장 인증 → 좌석 조회 ────
+
+    async function selectTrain(train, el) {
+      document.querySelectorAll('.train-item').forEach(i => i.classList.remove('selected'));
+      el.classList.add('selected');
+      selectedTrain = train;
+      selectedSeat = null;
+      holdData = null;
+      document.getElementById('selSeatInfo').textContent = '좌석을 선택해주세요';
+      document.getElementById('selSeatInfo').className = 'sel-seat-info';
+      resetSeatButtons();
+
+      if (admitted && queueToken) await releaseCurrentQueueAccess();
+
+      setStep(2);
+      const q = await callWithTransientRetry('POST', '/queue/join', {
+        body: { event_id: train.eventId, user_id: USER_ID },
+        idemPrefix: 'q',
+      });
+      if (!q.ok || !q.body || !q.body.token) {
+        showBanner('error', '접속 대기를 시작하지 못했습니다. 잠시 후 다시 시도해주세요.');
+        return;
+      }
+
+      await startQueueWaiting(train, q.body);
+    }
+
+    async function loadSeats(eventId) {
+      const res = await call('GET', `/seats/${eventId}`);
+      seats = (res.body && res.body.seats) || [];
+      renderSeats();
+
+      const remain = seats.filter(s => s.status === 'AVAILABLE').length;
+      const el = document.querySelector('.train-item.selected .seat-remain');
+      if (el && selectedTrain) {
+        const ratio = selectedTrain.total > 0 ? remain / selectedTrain.total : 0;
+        el.className = 'seat-remain ' + (ratio >= 0.4 ? 'wide' : ratio >= 0.15 ? 'mid' : 'few');
+        el.innerHTML = `잔여 ${remain}석 <small>/ ${selectedTrain.total}석</small>`;
+      }
+    }
+
+    function coachNumberForSeat(seat, index) {
+      const explicit = Number(seat.coach_no ?? seat.car_no ?? seat.coach ?? seat.car);
+      if (Number.isInteger(explicit) && explicit >= 1 && explicit <= COACH_COUNT) return explicit;
+      const perCoach = Math.max(1, Math.ceil(seats.length / COACH_COUNT));
+      return Math.min(COACH_COUNT, Math.floor(index / perCoach) + 1);
+    }
+
+    function seatsInSelectedCoach() {
+      return seats.filter((seat, index) => coachNumberForSeat(seat, index) === selectedCoach);
+    }
+
+    function syncCoachTabs() {
+      document.querySelectorAll('.coach-tabs [data-coach]').forEach(button => {
+        const active = Number(button.dataset.coach) === selectedCoach;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', String(active));
+      });
+    }
+
+    function selectCoach(coach) {
+      const nextCoach = Math.min(COACH_COUNT, Math.max(1, Number(coach)));
+      if (nextCoach === selectedCoach) return;
+      if (holdData) {
+        showBanner('info', '호차를 변경했습니다. 기존에 확보한 좌석은 잠시 후 자동으로 해제됩니다.');
+      }
+      selectedCoach = nextCoach;
+      selectedSeat = null;
+      holdData = null;
+      hideStressDemo();
+      resetSeatButtons();
+      const info = document.getElementById('selSeatInfo');
+      info.textContent = '좌석을 선택해주세요';
+      info.className = 'sel-seat-info';
+      syncCoachTabs();
+      renderSeats();
+    }
+
+    function changeCoach(direction) {
+      const next = selectedCoach + Number(direction);
+      selectCoach(next < 1 ? COACH_COUNT : next > COACH_COUNT ? 1 : next);
+    }
+
+    function seatDisplayCode(seat) {
+      return seat?.display_code || seat?.seat_code || '-';
+    }
+
+    // 모든 호차는 KTX 일반실 기준 A·B | C·D, 10행으로 고정해 그린다.
+    // 운영 DB의 내부 seat_code는 API 호출에 유지하고 화면에는 1A~10D만 표시한다.
+    function renderSeats() {
+      const layout = document.getElementById('seatLayout');
+      layout.innerHTML = '';
+      const coachSeats = seatsInSelectedCoach();
+      const columns = ['A', 'B', 'C', 'D'];
+      const columnHead = document.createElement('div');
+      columnHead.className = 'seat-column-head';
+      columns.forEach((name, index) => {
+        if (index === 2) columnHead.appendChild(document.createElement('i'));
+        const label = document.createElement('span');
+        label.textContent = name;
+        columnHead.appendChild(label);
+      });
+      layout.appendChild(columnHead);
+
+      for (let rowIndex = 0; rowIndex < 10; rowIndex += 1) {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex; gap:10px; align-items:center;';
+
+        columns.forEach((column, columnIndex) => {
+          if (columnIndex === 2) {
+            const aisle = document.createElement('div');
+            aisle.style.cssText = 'width:34px; flex:0 0 34px;';
+            aisle.setAttribute('aria-hidden', 'true');
+            row.appendChild(aisle);
+          }
+          const seatIndex = rowIndex * 4 + columnIndex;
+          const s = coachSeats[seatIndex];
+          const displayCode = `${rowIndex + 1}${column}`;
+          const taken = !s || s.status !== 'AVAILABLE';
+          const prem = s && s.grade && s.grade !== 'STANDARD';
+          const btn = document.createElement('button');
+          btn.className = `tseat ${taken ? 'taken' : prem ? 'prem avail' : 'avail'}`;
+          btn.style.flex = '1';
+          btn.textContent = displayCode;
+          btn.disabled = taken;
+          if (s) {
+            btn.dataset.seatId = String(s.id);
+            btn.title = `seat_id=${s.id} status=${s.status} version=${s.version}` + (s.price ? ` price=${s.price}` : '');
+            if (!taken) btn.onclick = () => selectSeat({ ...s, display_code: displayCode }, btn);
+          } else {
+            btn.title = '운영 좌석 데이터 준비 중';
+          }
+          row.appendChild(btn);
+        });
+
+        layout.appendChild(row);
+      }
+    }
+
+    function selectSeat(seat, btn) {
+      hideStressDemo();
+      // 선점 후 다른 좌석을 다시 고르면 진행 상태를 좌석 선점 단계 이전으로 되돌린다.
+      // 기존 선점은 취소 API가 없으므로 TTL이 지나면 자동 해제된다.
+      if (holdData) {
+        holdData = null;
+        resetSeatButtons();
+        setStep(2);
+        showBanner('info', '좌석을 다시 선택했습니다. 이전에 선택한 좌석은 잠시 후 자동으로 해제됩니다.');
+      }
+
+      document.querySelectorAll('.tseat.sel').forEach(s => {
+        const orig = seats.find(x => String(x.id) === s.dataset.seatId);
+        const prem = orig && orig.grade && orig.grade !== 'STANDARD';
+        s.className = `tseat ${prem ? 'prem avail' : 'avail'}`;
+        s.style.flex = '1';
+      });
+      btn.className = 'tseat sel';
+      btn.style.flex = '1';
+      selectedSeat = { ...seat, coach_no: selectedCoach };
+      document.getElementById('holdTrainBtn').disabled = false;
+      document.getElementById('stressBtn').disabled = false;
+
+      const info = document.getElementById('selSeatInfo');
+      const gradeLabel = (seat.grade && seat.grade !== 'STANDARD') ? seat.grade : '일반';
+      const priceLabel = seat.price ? `${Number(seat.price).toLocaleString()}원` : '';
+      info.textContent = `${selectedCoach}호차 ${seatDisplayCode(seat)} · ${gradeLabel}${priceLabel ? ' · ' + priceLabel : ''}`;
+      info.className = 'sel-seat-info show';
+      const finalPrice = Number(seat.price ?? selectedTrain.price).toLocaleString() + '원';
+      document.getElementById('seatOrderPrice').textContent = finalPrice;
+      document.getElementById('seatOrderTotal').textContent = finalPrice;
+    }
+
+    function resetSeatButtons() {
+      const holdBtn = document.getElementById('holdTrainBtn');
+      holdBtn.style.display = 'block';
+      holdBtn.disabled = !selectedSeat;
+      const bookBtn = document.getElementById('bookTrainBtn');
+      bookBtn.style.display = 'none';
+      bookBtn.disabled = true;
+      bookBtn.textContent = '결제하기';
+      const stressBtn = document.getElementById('stressBtn');
+      if (stressBtn) stressBtn.disabled = !selectedSeat;
+    }
+
+    function hideStressDemo() {
+      const demoPanel = document.getElementById('seatDemoPanel');
+      const resultPanel = document.getElementById('stressPanel');
+      const logPanel = document.getElementById('logPanel');
+      if (demoPanel) demoPanel.className = 'seat-demo-panel';
+      if (resultPanel) resultPanel.className = 'stress-panel';
+      if (logPanel) logPanel.innerHTML = '';
+    }
+
+    async function stressSeat(n = 5) {
+      if (!selectedSeat || !selectedTrain || stressDemoRunning) {
+        if (!selectedSeat) showBanner('warn', '먼저 시연할 좌석을 선택해주세요.');
+        return;
+      }
+
+      const seatId = selectedSeat.id;
+      const seatCode = `${selectedCoach}호차 ${seatDisplayCode(selectedSeat)}`;
+      const stressBtn = document.getElementById('stressBtn');
+      const logPanel = document.getElementById('logPanel');
+      stressBtn.disabled = true;
+      stressBtn.textContent = '요청 전송 중...';
+      logPanel.innerHTML = '';
+      document.getElementById('seatDemoPanel').className = 'seat-demo-panel show';
+      document.getElementById('stressPanel').className = 'stress-panel';
+      stressDemoRunning = true;
+      previewStressHoldCount = 0;
+
+      try {
+        const requests = Array.from({ length: n }, () => call('POST', `/seats/${seatId}/hold`, {
+          body: { event_id: selectedTrain.eventId, user_id: USER_ID },
+          idemPrefix: 'stress',
+        }));
+        const results = await Promise.all(requests);
+        const ok = results.filter(result => result.ok).length;
+        const conflicts = results.filter(result => result.status === 409).length;
+
+        document.getElementById('stressOk').textContent = ok;
+        document.getElementById('stressConflict').textContent = conflicts;
+        document.getElementById('stressDesc').textContent =
+          `${seatCode}에 ${n}건을 동시에 요청했습니다. 성공 ${ok}건, 충돌 거절 ${conflicts}건으로 중복 선점 여부를 확인했습니다.`;
+        document.getElementById('stressPanel').className = 'stress-panel show';
+        showBanner(ok === 1 && conflicts === n - 1 ? 'success' : 'warn',
+          ok === 1 && conflicts === n - 1
+            ? '동시성 제어가 정상입니다. 한 요청만 성공했습니다.'
+            : '응답 결과를 API 통신 로그에서 확인해주세요.');
+      } finally {
+        stressDemoRunning = false;
+        stressBtn.textContent = '좌석 5건 선택';
+        selectedSeat = null;
+        holdData = null;
+        resetSeatButtons();
+        document.getElementById('holdTrainBtn').disabled = true;
+        const info = document.getElementById('selSeatInfo');
+        info.textContent = '좌석을 다시 선택해주세요';
+        info.className = 'sel-seat-info';
+        await loadSeats(selectedTrain.eventId);
+      }
+    }
+
+
+    // ── 3) 좌석 선점 ──────────────────────────────────────────
+
+    async function holdTrainSeat() {
+      if (!selectedSeat || !selectedTrain) return;
+
+      const res = await call('POST', `/seats/${selectedSeat.id}/hold`, {
+        body: { event_id: selectedTrain.eventId, user_id: USER_ID },
+        idemPrefix: 'h',
+      });
+
+      if (!res.ok) {
+        showBanner('warn', res.status === 409
+          ? '다른 고객이 먼저 선택한 좌석입니다. 다른 좌석을 선택해주세요.'
+          : '좌석을 확보하지 못했습니다. 잠시 후 다시 시도해주세요.');
+        setStep(3);
+        await loadSeats(selectedTrain.eventId);
+        return;
+      }
+
+      setStep(3);
+      holdData = { seat: selectedSeat, ttl: res.body.hold_ttl_seconds };
+      document.getElementById('holdTrainBtn').style.display = 'none';
+      document.getElementById('stressBtn').disabled = true;
+      const bookBtn = document.getElementById('bookTrainBtn');
+      bookBtn.style.display = 'block';
+      bookBtn.disabled = false;
+      bookBtn.textContent = `결제하기 (${holdData.ttl}초 내)`;
+    }
+
+    /**
+     * [추가] 결제수단 선택 → 예약 생성 → Kafka 결제·알림 결과 확인
+     * 수정자: wldnjs0653
+     * 수정일: 2026-09-16
+     *
+     * 처리 순서:
+     * 1. 사용자가 결제수단을 선택한다.
+     * 2. POST /bookings로 예약을 확정한다.
+     * 3. Backend가 booking.created 이벤트를 Kafka에 발행한다.
+     * 4. paymentConsumer가 결제 결과를 저장하고 payment.completed를 발행한다.
+     * 5. notificationConsumer가 알림 처리를 완료한다.
+     * 6. 이 화면은 GET /payments/:bookingId로 결과를 확인한 뒤 완료 화면을 표시한다.
+     *
+     * 주의:
+     * 브라우저가 Kafka broker에 직접 연결되는 구조가 아니다.
+     * 실제 Kafka Producer/Consumer 처리는 Backend에서 수행한다.
+     */
+    // ── 4) 결제수단 선택 → 예매 확정 → Kafka 결제·알림 ───────
+
+    /**
+     * [추가] 결제 모달 초기화 및 표시
+     * 좌석 선점 정보와 사용자가 선택한 열차 정보를 결제창에 반영한다.
+     */
+    function openPaymentModal() {
+      if (!holdData || !selectedTrain || paymentInProgress) return;
+
+      const seat = holdData.seat;
+      const amount = Number(seat.price ?? selectedTrain.price);
+      document.getElementById('payRoute').textContent =
+        `${document.getElementById('fromStation').value} → ${document.getElementById('toStation').value}`;
+      document.getElementById('paySeat').textContent = `${selectedTrain.name} · ${seat.coach_no || selectedCoach}호차 ${seatDisplayCode(seat)}`;
+      document.getElementById('payAmount').textContent = `${amount.toLocaleString()}원`;
+      document.getElementById('paymentAgree').checked = false;
+      document.getElementById('payError').textContent = '';
+      document.querySelector('input[name="paymentMethod"][value="신용·체크카드"]').checked = true;
+      document.getElementById('cardCompany').value = '';
+      document.getElementById('installment').selectedIndex = 0;
+      syncPaymentMethodOptions();
+      document.getElementById('paymentFormView').style.display = 'block';
+      document.getElementById('paymentProcessingView').className = 'payment-processing';
+      document.getElementById('paymentDoneDot').className = 'process-dot';
+      document.getElementById('notificationDoneDot').className = 'process-dot';
+      document.getElementById('paymentModal').className = 'modal-backdrop show';
+      document.getElementById('paymentModal').setAttribute('aria-hidden', 'false');
+    }
+
+    function closePaymentModal(force = false) {
+      if (paymentInProgress && !force) return;
+      const modal = document.getElementById('paymentModal');
+      modal.className = 'modal-backdrop';
+      modal.setAttribute('aria-hidden', 'true');
+    }
+
+    function syncPaymentMethodOptions() {
+      const selected = document.querySelector('input[name="paymentMethod"]:checked')?.value;
+      document.querySelector('.card-options').style.display =
+        selected === '신용·체크카드' ? 'grid' : 'none';
+    }
+
+    /**
+     * [추가] 사용자 결제 확인
+     * 필수 동의와 결제수단을 검증한 후 예약 API를 호출하고,
+     * 예약 성공 시 Kafka 기반 결제·알림 결과 조회를 시작한다.
+     */
+    async function confirmPayment() {
+      if (paymentInProgress) return;
+      const agree = document.getElementById('paymentAgree');
+      const error = document.getElementById('payError');
+      if (!agree.checked) {
+        error.textContent = '결제 진행 동의 항목을 확인해주세요.';
+        return;
+      }
+
+      paymentMethod = document.querySelector('input[name="paymentMethod"]:checked')?.value || '신용·체크카드';
+      if (paymentMethod === '신용·체크카드' && !document.getElementById('cardCompany').value) {
+        error.textContent = '결제할 카드사를 선택해주세요.';
+        return;
+      }
+      paymentInProgress = true;
+      error.textContent = '';
+      document.getElementById('paymentFormView').style.display = 'none';
+      document.getElementById('paymentProcessingView').className = 'payment-processing show';
+      document.getElementById('processingTitle').textContent = '결제를 처리하고 있습니다';
+      document.getElementById('processingMessage').innerHTML =
+        '창을 닫거나 새로고침하지 마세요.<br>결제 승인 결과를 안전하게 확인하고 있습니다.';
+
+      const booked = await bookTrain(true);
+      if (!booked) {
+        paymentInProgress = false;
+        closePaymentModal(true);
+        return;
+      }
+
+      rememberPendingPayment();
+      startPaymentStatusPolling();
+    }
+
+    /**
+     * [수정] 예약 확정 API 호출
+     * 수정자: wldnjs0653
+     * 수정일: 2026-09-16
+     * POST /bookings 성공 이후 Backend가 booking.created 이벤트를 발행한다.
+     * 이 HTML 함수가 Kafka에 직접 메시지를 발행하는 것은 아니다.
+     */
+    async function bookTrain(fromPayment = false) {
+      if (!holdData || !selectedTrain) return;
+
+      const res = await call('POST', '/bookings', {
+        body: { event_id: selectedTrain.eventId, seat_id: holdData.seat.id, user_id: USER_ID },
+        idemPrefix: 'b',
+      });
+
+      if (!res.ok) {
+        showBanner('warn', res.status === 409
+          ? '다른 고객이 먼저 선택했거나 좌석 선택 시간이 만료되었습니다.'
+          : '예매 확정에 실패했습니다. 잠시 후 다시 시도해주세요.');
+        setStep(3);
+        holdData = null;
+        resetSeatButtons();
+        await loadSeats(selectedTrain.eventId);
+        return false;
+      }
+
+      bookingData = {
+        bookingId: res.body.booking_id,
+        status: (res.body.status || 'confirmed').toUpperCase(),
+        train: selectedTrain,
+        seat: holdData.seat,
+        from: document.getElementById('fromStation').value,
+        to: document.getElementById('toStation').value,
+        date: document.getElementById('tripDate').value,
+        pax: parseInt(document.getElementById('paxCount').value, 10),
+        paymentStartedAt: Date.now(),
+        paymentMethod,
+      };
+
+      if (!fromPayment) {
+        paymentInProgress = true;
+        rememberPendingPayment();
+        startPaymentStatusPolling(true);
+      }
+      return true;
+    }
+
+    function showTicketResult() {
+      document.body.className = 'view-complete';
+      setStep(4);
+      const card = document.getElementById('resultCard');
+      const visual = document.getElementById('ticketVisual');
+      const state = paymentState();
+      const approved = state === 'approved';
+      const failed = state === 'failed';
+      card.className = `result-card payment-result is-${state}`;
+      card.style.display = 'block';
+      document.getElementById('bookingHistory').style.display = 'none';
+      document.getElementById('seatSelectCard').style.display = 'none';
+      document.getElementById('trainListSection').style.display = 'none';
+      document.getElementById('refreshBtn').style.display = 'block';
+      document.getElementById('paymentCheckBtn').style.display = approved || failed ? 'none' : 'block';
+      document.getElementById('ticketViewBtn').style.display = approved ? 'block' : 'none';
+
+      const b = bookingData;
+      const gradeLabel = (b.seat.grade && b.seat.grade !== 'STANDARD') ? b.seat.grade : '일반';
+      const coachLabel = `${b.seat.coach_no || selectedCoach}호차`;
+
+      visual.innerHTML = `
+        <ol class="payment-flow" aria-label="예매 진행 단계">
+          <li class="flow-done"><span class="flow-dot">✓</span>예약 접수</li>
+          <li class="flow-line" aria-hidden="true"></li>
+          <li class="${approved ? 'flow-done' : 'flow-current'}" ${!approved ? 'aria-current="step"' : ''}><span class="flow-dot">${approved ? '✓' : '2'}</span>결제 확인</li>
+          <li class="flow-line" aria-hidden="true"></li>
+          <li class="${approved ? 'flow-done' : ''}" ${approved ? 'aria-current="step"' : ''}><span class="flow-dot">${approved ? '✓' : '3'}</span>예매 완료</li>
+        </ol>
+        <div class="completion-head">
+          <div class="completion-check" aria-hidden="true">${approved ? '✓' : failed ? '!' : '◷'}</div>
+          <div class="payment-eyebrow">${approved ? 'PAYMENT CONFIRMED' : failed ? 'PAYMENT NOT COMPLETED' : 'PAYMENT PENDING'}</div>
+          <h2 role="status" aria-live="polite">${approved ? '예매가 완료되었습니다!' : failed ? '결제가 완료되지 않았습니다' : '결제 확인이 조금 늦어지고 있어요'}</h2>
+          ${!approved && !failed ? `<div class="payment-auto-status"><span class="payment-status-spinner" aria-hidden="true"></span>자동 확인 중 · 경과 시간 <span id="paymentElapsed">${formatPaymentElapsed(Date.now() - b.paymentStartedAt)}</span></div>` : ''}
+        </div>
+        <div class="reference-complete-card">
+          <div class="complete-booking-bar">
+            <span>${approved ? '예매번호' : '예약 접수번호'}</span><strong>${b.bookingId}</strong>
+          </div>
+          <div class="complete-trip-row">
+            <span class="complete-trip-logo">KTX</span>
+            <div class="complete-trip-name"><strong>${b.train.name}</strong><small>${b.date}</small></div>
+            <div class="complete-trip-time"><strong>${b.train.dep}</strong><small>${b.from}</small></div>
+            <div class="complete-trip-arrow">→</div>
+            <div class="complete-trip-time"><strong>${b.train.arr}</strong><small>${b.to}</small></div>
+            <div class="complete-trip-duration">${b.train.dur}</div>
+          </div>
+          <div class="complete-meta">
+            <div><span>좌석정보</span><strong>${coachLabel} ${seatDisplayCode(b.seat)} (${gradeLabel}실)</strong></div>
+            <div><span>${approved ? '결제금액' : '결제 요청 금액'}</span><strong>${Number(approved ? b.payment.amount : (b.seat.price ?? b.train.price)).toLocaleString()}원</strong></div>
+            <div><span>승객정보</span><strong>홍길동 (성인 ${b.pax}명)</strong></div>
+            <div><span>결제상태</span><strong id="paymentLine">${approved ? '승인 완료' : failed ? '승인 실패' : '승인 결과 확인 중'}</strong></div>
+          </div>
+        </div>
+      `;
+    }
+
+    async function copyBookingNumber() {
+      if (!bookingData?.bookingId) return;
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(bookingData.bookingId);
+        } else {
+          const textarea = document.createElement('textarea');
+          textarea.value = bookingData.bookingId;
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand('copy');
+          textarea.remove();
+        }
+        showBanner('success', '예매번호를 복사했습니다.');
+      } catch {
+        showBanner('info', `예매번호: ${bookingData.bookingId}`);
+      }
+    }
+
+    function showBookingHistory() {
+      if (!bookingData) return;
+      document.getElementById('resultCard').style.display = 'none';
+      const history = document.getElementById('bookingHistory');
+      history.style.display = 'grid';
+      const b = bookingData;
+      const grade = (b.seat.grade && b.seat.grade !== 'STANDARD') ? b.seat.grade : '일반';
+      historyBookingItems = [
+        {
+          bookingNumber: b.bookingId,
+          trainName: b.train.name,
+          date: b.date,
+          from: b.from,
+          dep: b.train.dep,
+          to: b.to,
+          arr: b.train.arr,
+          duration: b.train.dur,
+          coach: b.seat.coach_no || selectedCoach,
+          seat: seatDisplayCode(b.seat),
+          grade,
+          amount: Number(b.seat.price ?? b.train.price),
+          paymentMethod: b.paymentMethod || paymentMethod || '간편결제',
+          passenger: `홍길동 (성인 ${b.pax || 1}명)`,
+          status: paymentState() === 'approved' ? '결제·예매 완료' : paymentState() === 'failed' ? '결제 승인 실패 · 예매 미확정' : '결제 승인 확인 중 · 예매 미확정',
+        },
+        {
+          bookingNumber: 'TR20261015203457',
+          trainName: 'KTX 203',
+          date: '2026-10-15',
+          from: '부산',
+          dep: '14:00',
+          to: '서울',
+          arr: '16:37',
+          duration: '2시간 37분',
+          coach: 3,
+          seat: '7A',
+          grade: '일반',
+          amount: 59800,
+          paymentMethod: '신용·체크카드',
+          passenger: '홍길동 (성인 1명)',
+          status: '결제·예매 완료',
+        },
+      ];
+      document.getElementById('upcomingBookingTab').textContent = `예정된 예매 (${historyBookingItems.length})`;
+      document.getElementById('historyBookings').innerHTML = historyBookingItems.map((item, index) => `
+        <article class="history-booking">
+          <span class="history-logo">KTX</span>
+          <div><strong>${item.trainName}</strong><small>${item.date}<br>${item.from} ${item.dep} → ${item.to} ${item.arr}<br>${item.coach}호차 ${item.seat} (${item.grade}실)</small></div>
+          <div class="history-price">${item.amount.toLocaleString()}원<button type="button" onclick="openBookingDetail(${index})">상세보기</button></div>
+        </article>`).join('');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function openBookingDetail(index) {
+      const item = historyBookingItems[index];
+      if (!item) return;
+      document.getElementById('bookingDetailContent').innerHTML = `
+        <div class="booking-detail-ticket">
+          <div class="booking-detail-number">
+            <span>예매번호</span><strong>${item.bookingNumber}</strong>
+            <button type="button" onclick="closeBookingDetail()" aria-label="예매 상세 닫기">✕</button>
+          </div>
+          <div class="booking-detail-trip">
+            <span class="booking-detail-logo">KTX</span>
+            <div class="booking-detail-train"><strong>${item.trainName}</strong><span>${item.date}</span></div>
+            <div class="booking-detail-time"><strong>${item.dep}</strong><span>${item.from}</span></div>
+            <div class="booking-detail-arrow">→</div>
+            <div class="booking-detail-time"><strong>${item.arr}</strong><span>${item.to}</span></div>
+            <div class="booking-detail-duration">${item.duration}</div>
+          </div>
+          <div class="booking-detail-info">
+            <div><span>좌석정보</span><strong>${item.coach}호차 ${item.seat} (${item.grade}실)</strong></div>
+            <div><span>결제금액</span><strong>${item.amount.toLocaleString()}원</strong></div>
+            <div><span>승객정보</span><strong>${item.passenger}</strong></div>
+            <div><span>결제상태</span><strong class="payment-state">${item.status} · ${item.amount.toLocaleString()}원 · ${item.paymentMethod}</strong></div>
+          </div>
+        </div>`;
+      const modal = document.getElementById('bookingDetailModal');
+      modal.classList.add('show');
+      modal.setAttribute('aria-hidden', 'false');
+    }
+
+    function closeBookingDetail() {
+      const modal = document.getElementById('bookingDetailModal');
+      modal.classList.remove('show');
+      modal.setAttribute('aria-hidden', 'true');
+    }
+
+    function logout() {
+      sessionStorage.removeItem('ticketing_demo_login');
+      sessionStorage.removeItem('ticketing_member_id');
+      location.assign(location.protocol === 'file:' ? 'login.html' : '/login.html');
+    }
+
+    /**
+     * [추가] 결제 완료 상태 표시
+     * Kafka Consumer가 PostgreSQL에 반영한 결제 결과를 승차권 화면에 표시한다.
+     */
+    function updateTicketPayment(payment) {
+      if (TicketRailPaymentStatus.classifyPayment(payment, bookingData?.bookingId) !== 'approved') return;
+      const line = document.getElementById('paymentLine');
+      if (line) {
+        line.textContent = `결제 완료 · ${Number(payment.amount).toLocaleString()}원 · ${paymentMethod}`;
+        line.style.color = 'var(--green)';
+      }
+      const badge = document.querySelector('#ticketVisual .ticket-status');
+      if (badge) {
+        badge.className = 'ticket-status confirmed';
+        badge.textContent = '결제·예매 완료';
+      }
+    }
+
+    /**
+     * [추가] 결제·예매 완료 모달
+     * 사용자가 실제로 선택한 구간, 열차, 좌석, 결제수단, 금액,
+     * Backend가 발급한 예매번호를 완료 화면에 표시한다.
+     */
+    function showCompletionModal(payment) {
+      closePaymentModal(true);
+      const b = bookingData;
+      document.getElementById('completionDetails').innerHTML = `
+        <div class="complete-row"><span>이용 구간</span><strong>${b.from} → ${b.to}</strong></div>
+        <div class="complete-row"><span>열차·좌석</span><strong>${b.train.name} · ${b.seat.coach_no || selectedCoach}호차 ${seatDisplayCode(b.seat)}</strong></div>
+        <div class="complete-row"><span>결제수단</span><strong>${paymentMethod}</strong></div>
+        <div class="complete-row"><span>결제금액</span><strong>${Number(payment.amount).toLocaleString()}원</strong></div>
+        <div class="complete-row"><span>예매번호</span><strong>${b.bookingId}</strong></div>
+      `;
+      document.getElementById('completionModal').className = 'modal-backdrop show';
+      document.getElementById('completionModal').setAttribute('aria-hidden', 'false');
+    }
+
+    function closeCompletionModal() {
+      const modal = document.getElementById('completionModal');
+      modal.className = 'modal-backdrop';
+      modal.setAttribute('aria-hidden', 'true');
+    }
+
+    /**
+     * [추가] 예매 완료 알림
+     * 같은 예약의 결제 승인과 알림 처리 완료를 확인한 뒤 한 번만 표시한다.
+     */
+    function showPaymentToast(payment) {
+      const b = bookingData;
+      if (!b || TicketRailPaymentStatus.classifyPayment(payment, b.bookingId) !== 'approved' || payment.notification_sent !== true || notifiedBookingIds.has(b.bookingId)) return;
+      notifiedBookingIds.add(b.bookingId);
+      document.getElementById('paymentToastMessage').textContent =
+        `${b.train.name} ${b.seat.coach_no || selectedCoach}호차 ${seatDisplayCode(b.seat)} · 예매번호 ${b.bookingId}`;
+      const toast = document.getElementById('paymentToast');
+      toast.className = 'payment-toast show';
+      clearTimeout(paymentToastTimer);
+      paymentToastTimer = setTimeout(() => { toast.className = 'payment-toast'; }, 6500);
+    }
+
+    // ── 5) 결과 조회 ──────────────────────────────────────────
+
+    /**
+     * [수정] 예약·결제 결과 재조회
+     * 수정자: wldnjs0653
+     * 수정일: 2026-09-16
+     * PostgreSQL 예약 정보와 Kafka Consumer가 반영한 결제 상태를 함께 확인한다.
+     * 결제가 아직 처리 중이면 사용자에게 대기 안내를 표시한다.
+     */
+    async function queryResult() {
+      if (!bookingData) return;
+      return checkPaymentNow();
+    }
+
+    // ── 초기화 ────────────────────────────────────────────────
+
+    async function cancelSeatSelect() {
+      if (admitted && queueToken) await releaseCurrentQueueAccess();
+      document.getElementById('seatSelectCard').style.display = 'none';
+      document.body.className = 'view-results';
+      document.getElementById('trainListSection').style.display = 'block';
+      setStep(1);
+      selectedSeat = null;
+      holdData = null;
+      hideStressDemo();
+      resetSeatButtons();
+      document.getElementById('holdTrainBtn').disabled = true;
+      document.getElementById('stressBtn').disabled = true;
+      document.getElementById('selSeatInfo').className = 'sel-seat-info';
+    }
+
+    async function resetAll() {
+      paymentTracker?.stop();
+      notificationTracker?.stop();
+      clearTimeout(paymentToastTimer);
+      await cancelSeatSelect();
+      selectedTrain = null; selectedSeat = null; holdData = null;
+      bookingData = null; queueToken = null; admitted = false;
+      paymentInProgress = false;
+      closePaymentModal(true);
+      document.getElementById('completionModal').className = 'modal-backdrop';
+      document.getElementById('paymentToast').className = 'payment-toast';
+      document.getElementById('trainListSection').style.display = 'none';
+      document.getElementById('introCard')?.style.removeProperty('display');
+      document.getElementById('resultCard').style.display = 'none';
+      document.getElementById('bookingHistory').style.display = 'none';
+      cancelSeatSelect();
+      hideBanner();
+      setStep(1);
+      document.body.className = '';
+    }
+
+    document.getElementById('tripDate').value = serviceDate(new Date());
+
+    checkHealth();
+    setInterval(checkHealth, 15000);
+    if (LOCAL_PREVIEW) clearQueueSession();
+    if (!resumePendingPayment()) resumeQueueWaiting();
+  </script>
+</body>
+</html>

@@ -1,0 +1,173 @@
+---
+- name: Deploy split payment and notification consumers
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+
+    runner_kubeconfig: >-
+      {{
+        lookup('env', 'KUBECONFIG')
+        | default(lookup('env', 'HOME') + '/.kube/config', true)
+      }}
+
+    consumer_namespace: app
+    rollout_timeout: 5m
+
+    consumer_deployment_manifest: >-
+      {{ playbook_dir }}/../k8s_playbooks/app/consumer-deployments.yaml
+
+    consumer_keda_manifest: >-
+      {{ playbook_dir }}/../k8s_playbooks/app/consumer-keda.yaml
+
+    consumers:
+      - name: payment-consumer-v2
+        role: payment
+      - name: notification-consumer-v2
+        role: notification
+
+  pre_tasks:
+    - name: Require an immutable consumer image
+      ansible.builtin.assert:
+        that:
+          - backend_image is defined
+          - backend_image | length > 0
+          - backend_image is match(
+              '^ghcr\.io/[a-z0-9._-]+/[a-z0-9._/-]+:sha-[0-9a-f]{7,64}$'
+            )
+
+    - name: Check consumer Deployments
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/kubectl
+          - --kubeconfig
+          - "{{ runner_kubeconfig }}"
+          - --namespace
+          - "{{ consumer_namespace }}"
+          - get
+          - deployment
+          - "{{ item.name }}"
+      loop: "{{ consumers }}"
+      register: consumer_checks
+      changed_when: false
+      failed_when: false
+
+  tasks:
+    - name: Bootstrap missing consumer Deployments
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/kubectl
+          - --kubeconfig
+          - "{{ runner_kubeconfig }}"
+          - apply
+          - --filename
+          - "{{ consumer_deployment_manifest }}"
+      when: >-
+        consumer_checks.results
+        | selectattr('rc', 'ne', 0)
+        | list
+        | length > 0
+      register: consumer_bootstrap
+      changed_when: >-
+        consumer_bootstrap.stdout | default('')
+        is search('created|configured')
+
+    - name: Apply consumer KEDA configuration
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/kubectl
+          - --kubeconfig
+          - "{{ runner_kubeconfig }}"
+          - apply
+          - --filename
+          - "{{ consumer_keda_manifest }}"
+      register: keda_apply
+      changed_when: >-
+        keda_apply.stdout is search('created|configured')
+
+    - name: Deploy immutable image to consumers
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/kubectl
+          - --kubeconfig
+          - "{{ runner_kubeconfig }}"
+          - --namespace
+          - "{{ consumer_namespace }}"
+          - set
+          - image
+          - "deployment/{{ item.name }}"
+          - "*={{ backend_image }}"
+      loop: "{{ consumers }}"
+      register: image_updates
+      changed_when: >-
+        image_updates.stdout is search('image updated')
+
+    - name: Enforce consumer roles and capacity
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/kubectl
+          - --kubeconfig
+          - "{{ runner_kubeconfig }}"
+          - --namespace
+          - "{{ consumer_namespace }}"
+          - set
+          - env
+          - "deployment/{{ item.name }}"
+          - "CONSUMER_ROLE={{ item.role }}"
+          - "PAYMENT_PARTITIONS_CONCURRENCY=4"
+          - "NOTIFICATION_PARTITIONS_CONCURRENCY=3"
+          - "PG_POOL_MAX=3"
+          - "CONSUMER_SUCCESS_LOG_EVERY=100"
+      loop: "{{ consumers }}"
+      register: env_updates
+      changed_when: >-
+        env_updates.stdout is search('updated')
+
+    - name: Wait for consumer rollouts
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/kubectl
+          - --kubeconfig
+          - "{{ runner_kubeconfig }}"
+          - --namespace
+          - "{{ consumer_namespace }}"
+          - rollout
+          - status
+          - "deployment/{{ item.name }}"
+          - "--timeout={{ rollout_timeout }}"
+      loop: "{{ consumers }}"
+      changed_when: false
+
+    - name: Read deployed consumer images
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/kubectl
+          - --kubeconfig
+          - "{{ runner_kubeconfig }}"
+          - --namespace
+          - "{{ consumer_namespace }}"
+          - get
+          - deployment
+          - "{{ item.name }}"
+          - -o
+          - "jsonpath={.spec.template.spec.containers[0].image}"
+      loop: "{{ consumers }}"
+      register: deployed_images
+      changed_when: false
+
+    - name: Verify deployed consumer images
+      ansible.builtin.assert:
+        that:
+          - item.stdout == backend_image
+      loop: "{{ deployed_images.results }}"
+
+  post_tasks:
+    - name: Print consumer deployment result
+      ansible.builtin.debug:
+        msg:
+          - "Payment consumer: app/payment-consumer-v2"
+          - "Notification consumer: app/notification-consumer-v2"
+          - "Image: {{ backend_image }}"
+          - "KEDA: 1..6"

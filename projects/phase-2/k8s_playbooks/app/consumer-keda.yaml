@@ -1,0 +1,137 @@
+{
+  "apiVersion": "keda.sh/v1alpha1",
+  "kind": "ScaledObject",
+  "metadata": {
+    "labels": {
+      "scaledobject.keda.sh/name": "payment-consumer-v2-kafka"
+    },
+    "name": "payment-consumer-v2-kafka",
+    "namespace": "app"
+  },
+  "spec": {
+    "advanced": {
+      "horizontalPodAutoscalerConfig": {
+        "behavior": {
+          "scaleDown": {
+            "policies": [
+              {
+                "periodSeconds": 60,
+                "type": "Percent",
+                "value": 50
+              }
+            ],
+            "selectPolicy": "Max",
+            "stabilizationWindowSeconds": 300
+          },
+          "scaleUp": {
+            "policies": [
+              {
+                "periodSeconds": 15,
+                "type": "Pods",
+                "value": 6
+              },
+              {
+                "periodSeconds": 15,
+                "type": "Percent",
+                "value": 100
+              }
+            ],
+            "selectPolicy": "Max",
+            "stabilizationWindowSeconds": 0
+          }
+        }
+      }
+    },
+    "cooldownPeriod": 60,
+    "maxReplicaCount": 6,
+    "minReplicaCount": 1,
+    "pollingInterval": 2,
+    "scaleTargetRef": {
+      "name": "payment-consumer-v2"
+    },
+    "triggers": [
+      {
+        "metadata": {
+          "activationLagThreshold": "1",
+          "allowIdleConsumers": "false",
+          "bootstrapServers": "ticketing-kafka-kafka-bootstrap.data.svc:9092",
+          "consumerGroup": "ticketing-backend-consumer-v1-payment",
+          "lagThreshold": "5",
+          "offsetResetPolicy": "latest",
+          "topic": "booking.created"
+        },
+        "type": "kafka"
+      }
+    ]
+  }
+}
+---
+{
+  "apiVersion": "keda.sh/v1alpha1",
+  "kind": "ScaledObject",
+  "metadata": {
+    "labels": {
+      "scaledobject.keda.sh/name": "notification-consumer-v2-kafka"
+    },
+    "name": "notification-consumer-v2-kafka",
+    "namespace": "app"
+  },
+  "spec": {
+    "advanced": {
+      "horizontalPodAutoscalerConfig": {
+        "behavior": {
+          "scaleDown": {
+            "policies": [
+              {
+                "periodSeconds": 60,
+                "type": "Percent",
+                "value": 50
+              }
+            ],
+            "selectPolicy": "Max",
+            "stabilizationWindowSeconds": 300
+          },
+          "scaleUp": {
+            "policies": [
+              {
+                "periodSeconds": 15,
+                "type": "Pods",
+                "value": 6
+              },
+              {
+                "periodSeconds": 15,
+                "type": "Percent",
+                "value": 100
+              }
+            ],
+            "selectPolicy": "Max",
+            "stabilizationWindowSeconds": 0
+          }
+        }
+      },
+      "scalingModifiers": {}
+    },
+    "cooldownPeriod": 60,
+    "maxReplicaCount": 6,
+    "minReplicaCount": 1,
+    "pollingInterval": 2,
+    "scaleTargetRef": {
+      "name": "notification-consumer-v2"
+    },
+    "triggers": [
+      {
+        "metadata": {
+          "activationLagThreshold": "1",
+          "allowIdleConsumers": "false",
+          "bootstrapServers": "ticketing-kafka-kafka-bootstrap.data.svc:9092",
+          "consumerGroup": "ticketing-backend-consumer-v1-notification",
+          "lagThreshold": "5",
+          "offsetResetPolicy": "latest",
+          "scaleToZeroOnInvalidOffset": "true",
+          "topic": "payment.completed"
+        },
+        "type": "kafka"
+      }
+    ]
+  }
+}

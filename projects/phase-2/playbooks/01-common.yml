@@ -1,0 +1,22 @@
+---
+- name: Kubernetes common environment check
+  hosts: k8s
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Show hostname
+      ansible.builtin.debug:
+        msg: "Hostname: {{ ansible_hostname }} / IP: {{ ansible_default_ipv4.address }}"
+
+    - name: Check OS
+      ansible.builtin.debug:
+        msg: "OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+
+    - name: Check CPU
+      ansible.builtin.debug:
+        msg: "CPU: {{ ansible_processor_vcpus }}"
+
+    - name: Check memory
+      ansible.builtin.debug:
+        msg: "Memory: {{ ansible_memtotal_mb }} MB"

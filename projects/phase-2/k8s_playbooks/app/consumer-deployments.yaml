@@ -1,0 +1,439 @@
+{
+  "apiVersion": "apps/v1",
+  "kind": "Deployment",
+  "metadata": {
+    "labels": {
+      "app.kubernetes.io/name": "payment-consumer-v2",
+      "app.kubernetes.io/part-of": "ticketing-platform",
+      "ticketrail.io/consumer-role": "payment"
+    },
+    "name": "payment-consumer-v2",
+    "namespace": "app"
+  },
+  "spec": {
+    "progressDeadlineSeconds": 600,
+    "replicas": 1,
+    "revisionHistoryLimit": 10,
+    "selector": {
+      "matchLabels": {
+        "app.kubernetes.io/name": "payment-consumer-v2"
+      }
+    },
+    "strategy": {
+      "rollingUpdate": {
+        "maxSurge": 1,
+        "maxUnavailable": 0
+      },
+      "type": "RollingUpdate"
+    },
+    "template": {
+      "metadata": {
+        "annotations": {
+          "ticketing.io/deployment-revision": "1789106975",
+          "ticketrail.io/source-commit": "7f42db48a1bb66dd55d03eb58f3806148ddb9807"
+        },
+        "labels": {
+          "app.kubernetes.io/name": "payment-consumer-v2",
+          "app.kubernetes.io/part-of": "ticketing-platform",
+          "ticketrail.io/consumer-role": "payment"
+        }
+      },
+      "spec": {
+        "affinity": {
+          "podAntiAffinity": {
+            "preferredDuringSchedulingIgnoredDuringExecution": [
+              {
+                "podAffinityTerm": {
+                  "labelSelector": {
+                    "matchLabels": {
+                      "app.kubernetes.io/name": "payment-consumer-v2"
+                    }
+                  },
+                  "topologyKey": "kubernetes.io/hostname"
+                },
+                "weight": 100
+              }
+            ]
+          }
+        },
+        "containers": [
+          {
+            "command": [
+              "node",
+              "src/consumers/main.js"
+            ],
+            "env": [
+              {
+                "name": "PORT",
+                "value": "8084"
+              },
+              {
+                "name": "KAFKA_BROKERS",
+                "value": "ticketing-kafka-kafka-bootstrap.data:9092"
+              },
+              {
+                "name": "KAFKA_CLIENT_ID",
+                "value": "ticketing-backend-consumer"
+              },
+              {
+                "name": "KAFKA_CONSUMER_GROUP",
+                "value": "ticketing-backend-consumer-v1"
+              },
+              {
+                "name": "PG_HOST",
+                "value": "ticketing-postgresql-rw.data"
+              },
+              {
+                "name": "PG_PORT",
+                "value": "5432"
+              },
+              {
+                "name": "PG_DATABASE",
+                "value": "ticketing"
+              },
+              {
+                "name": "REDIS_SENTINELS",
+                "value": "redis-sentinel.data:26379"
+              },
+              {
+                "name": "REDIS_SENTINEL_MASTER",
+                "value": "ticketing-master"
+              },
+              {
+                "name": "SKIP_KAFKA_CONSUMERS",
+                "value": "false"
+              },
+              {
+                "name": "PAYMENT_PARTITIONS_CONCURRENCY",
+                "value": "4"
+              },
+              {
+                "name": "NOTIFICATION_PARTITIONS_CONCURRENCY",
+                "value": "3"
+              },
+              {
+                "name": "CONSUMER_ROLE",
+                "value": "payment"
+              },
+              {
+                "name": "CONSUMER_SUCCESS_LOG_EVERY",
+                "value": "100"
+              },
+              {
+                "name": "PG_POOL_MAX",
+                "value": "3"
+              },
+              {
+                "name": "PG_POOL_IDLE_TIMEOUT_MS",
+                "value": "30000"
+              },
+              {
+                "name": "PG_POOL_CONNECTION_TIMEOUT_MS",
+                "value": "5000"
+              }
+            ],
+            "envFrom": [
+              {
+                "secretRef": {
+                  "name": "backend-secret"
+                }
+              }
+            ],
+            "image": "ghcr.io/jisoo9123/ticketing-api:sha-7f42db48a1bb",
+            "imagePullPolicy": "Always",
+            "livenessProbe": {
+              "failureThreshold": 3,
+              "httpGet": {
+                "path": "/health/live",
+                "port": "http",
+                "scheme": "HTTP"
+              },
+              "initialDelaySeconds": 10,
+              "periodSeconds": 10,
+              "successThreshold": 1,
+              "timeoutSeconds": 2
+            },
+            "name": "payment-consumer-v2",
+            "ports": [
+              {
+                "containerPort": 8084,
+                "name": "http",
+                "protocol": "TCP"
+              }
+            ],
+            "readinessProbe": {
+              "failureThreshold": 12,
+              "httpGet": {
+                "path": "/health/ready",
+                "port": "http",
+                "scheme": "HTTP"
+              },
+              "initialDelaySeconds": 3,
+              "periodSeconds": 5,
+              "successThreshold": 1,
+              "timeoutSeconds": 2
+            },
+            "resources": {
+              "limits": {
+                "cpu": "1",
+                "memory": "512Mi"
+              },
+              "requests": {
+                "cpu": "200m",
+                "memory": "128Mi"
+              }
+            },
+            "securityContext": {
+              "allowPrivilegeEscalation": false,
+              "capabilities": {
+                "drop": [
+                  "ALL"
+                ]
+              },
+              "readOnlyRootFilesystem": true
+            },
+            "terminationMessagePath": "/dev/termination-log",
+            "terminationMessagePolicy": "File"
+          }
+        ],
+        "dnsPolicy": "ClusterFirst",
+        "imagePullSecrets": [
+          {
+            "name": "ghcr-pull-secret"
+          }
+        ],
+        "restartPolicy": "Always",
+        "schedulerName": "default-scheduler",
+        "securityContext": {
+          "runAsGroup": 1000,
+          "runAsNonRoot": true,
+          "runAsUser": 1000,
+          "seccompProfile": {
+            "type": "RuntimeDefault"
+          }
+        },
+        "terminationGracePeriodSeconds": 60
+      }
+    }
+  }
+}
+---
+{
+  "apiVersion": "apps/v1",
+  "kind": "Deployment",
+  "metadata": {
+    "labels": {
+      "app.kubernetes.io/name": "notification-consumer-v2",
+      "app.kubernetes.io/part-of": "ticketing-platform",
+      "ticketrail.io/consumer-role": "notification"
+    },
+    "name": "notification-consumer-v2",
+    "namespace": "app"
+  },
+  "spec": {
+    "progressDeadlineSeconds": 600,
+    "replicas": 1,
+    "revisionHistoryLimit": 10,
+    "selector": {
+      "matchLabels": {
+        "app.kubernetes.io/name": "notification-consumer-v2"
+      }
+    },
+    "strategy": {
+      "rollingUpdate": {
+        "maxSurge": 1,
+        "maxUnavailable": 0
+      },
+      "type": "RollingUpdate"
+    },
+    "template": {
+      "metadata": {
+        "annotations": {
+          "ticketing.io/deployment-revision": "1789106975",
+          "ticketrail.io/source-commit": "7f42db48a1bb66dd55d03eb58f3806148ddb9807"
+        },
+        "labels": {
+          "app.kubernetes.io/name": "notification-consumer-v2",
+          "app.kubernetes.io/part-of": "ticketing-platform",
+          "ticketrail.io/consumer-role": "notification"
+        }
+      },
+      "spec": {
+        "affinity": {
+          "podAntiAffinity": {
+            "preferredDuringSchedulingIgnoredDuringExecution": [
+              {
+                "podAffinityTerm": {
+                  "labelSelector": {
+                    "matchLabels": {
+                      "app.kubernetes.io/name": "payment-consumer-v2"
+                    }
+                  },
+                  "topologyKey": "kubernetes.io/hostname"
+                },
+                "weight": 100
+              }
+            ]
+          }
+        },
+        "containers": [
+          {
+            "command": [
+              "node",
+              "src/consumers/main.js"
+            ],
+            "env": [
+              {
+                "name": "PORT",
+                "value": "8084"
+              },
+              {
+                "name": "KAFKA_BROKERS",
+                "value": "ticketing-kafka-kafka-bootstrap.data:9092"
+              },
+              {
+                "name": "KAFKA_CLIENT_ID",
+                "value": "ticketing-backend-consumer"
+              },
+              {
+                "name": "KAFKA_CONSUMER_GROUP",
+                "value": "ticketing-backend-consumer-v1"
+              },
+              {
+                "name": "PG_HOST",
+                "value": "ticketing-postgresql-rw.data"
+              },
+              {
+                "name": "PG_PORT",
+                "value": "5432"
+              },
+              {
+                "name": "PG_DATABASE",
+                "value": "ticketing"
+              },
+              {
+                "name": "REDIS_SENTINELS",
+                "value": "redis-sentinel.data:26379"
+              },
+              {
+                "name": "REDIS_SENTINEL_MASTER",
+                "value": "ticketing-master"
+              },
+              {
+                "name": "SKIP_KAFKA_CONSUMERS",
+                "value": "false"
+              },
+              {
+                "name": "PAYMENT_PARTITIONS_CONCURRENCY",
+                "value": "4"
+              },
+              {
+                "name": "NOTIFICATION_PARTITIONS_CONCURRENCY",
+                "value": "3"
+              },
+              {
+                "name": "CONSUMER_ROLE",
+                "value": "notification"
+              },
+              {
+                "name": "CONSUMER_SUCCESS_LOG_EVERY",
+                "value": "100"
+              },
+              {
+                "name": "PG_POOL_MAX",
+                "value": "3"
+              },
+              {
+                "name": "PG_POOL_IDLE_TIMEOUT_MS",
+                "value": "30000"
+              },
+              {
+                "name": "PG_POOL_CONNECTION_TIMEOUT_MS",
+                "value": "5000"
+              }
+            ],
+            "envFrom": [
+              {
+                "secretRef": {
+                  "name": "backend-secret"
+                }
+              }
+            ],
+            "image": "ghcr.io/jisoo9123/ticketing-api:sha-7f42db48a1bb",
+            "imagePullPolicy": "Always",
+            "livenessProbe": {
+              "failureThreshold": 3,
+              "httpGet": {
+                "path": "/health/live",
+                "port": "http",
+                "scheme": "HTTP"
+              },
+              "initialDelaySeconds": 10,
+              "periodSeconds": 10,
+              "successThreshold": 1,
+              "timeoutSeconds": 2
+            },
+            "name": "payment-consumer-v2",
+            "ports": [
+              {
+                "containerPort": 8084,
+                "name": "http",
+                "protocol": "TCP"
+              }
+            ],
+            "readinessProbe": {
+              "failureThreshold": 12,
+              "httpGet": {
+                "path": "/health/ready",
+                "port": "http",
+                "scheme": "HTTP"
+              },
+              "initialDelaySeconds": 3,
+              "periodSeconds": 5,
+              "successThreshold": 1,
+              "timeoutSeconds": 2
+            },
+            "resources": {
+              "limits": {
+                "cpu": "1",
+                "memory": "512Mi"
+              },
+              "requests": {
+                "cpu": "200m",
+                "memory": "128Mi"
+              }
+            },
+            "securityContext": {
+              "allowPrivilegeEscalation": false,
+              "capabilities": {
+                "drop": [
+                  "ALL"
+                ]
+              },
+              "readOnlyRootFilesystem": true
+            },
+            "terminationMessagePath": "/dev/termination-log",
+            "terminationMessagePolicy": "File"
+          }
+        ],
+        "dnsPolicy": "ClusterFirst",
+        "imagePullSecrets": [
+          {
+            "name": "ghcr-pull-secret"
+          }
+        ],
+        "restartPolicy": "Always",
+        "schedulerName": "default-scheduler",
+        "securityContext": {
+          "runAsGroup": 1000,
+          "runAsNonRoot": true,
+          "runAsUser": 1000,
+          "seccompProfile": {
+            "type": "RuntimeDefault"
+          }
+        },
+        "terminationGracePeriodSeconds": 60
+      }
+    }
+  }
+}
