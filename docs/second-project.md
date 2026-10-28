@@ -22,7 +22,7 @@ AWS 네트워크와 Terraform·ROSA 인프라 구축, 환경 간 연결 및 DR �
 
 | 환경 | 사용자 요청·데이터 위치 | 결제·알림 처리 위치 |
 | --- | --- | --- |
-| 온프레미스 | Kubernetes API · Redis Sentinel · PostgreSQL(CNPG) · Kafka | 온프레미스 Kubernetes |
+| 온프레미스 | Backend API · Redis Sentinel · PostgreSQL(CNPG) · Kafka | 온프레미스 Kubernetes |
 | 하이브리드 | 온프레미스 API·데이터 계층 유지 | 온프레미스와 AWS ROSA가 분담, Tailscale로 연결 |
 | Full AWS | ROSA API · ElastiCache for Valkey · RDS for PostgreSQL · MSK | AWS ROSA |
 
