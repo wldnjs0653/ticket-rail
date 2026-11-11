@@ -22,7 +22,9 @@
 
 ### 2. 서비스 연동 확인
 
-API와 Redis·PostgreSQL·Kafka를 함께 실행합니다. Docker Compose v2.20 이상과 Linux 컨테이너 환경이 필요합니다.
+![예약 번호별 Redis 좌석 선점·해제, PostgreSQL 예약 저장, Kafka 이벤트 발행 및 결제·알림 처리 시각](docs/images/booking-trace-example.png)
+
+*Docker Compose v2.20 이상과 Linux 컨테이너 환경이 필요합니다.*
 
 1. Windows에서는 **PowerShell**을 열고 아래 명령을 복사해 붙여넣은 뒤 실행합니다.
 
@@ -34,9 +36,5 @@ API와 Redis·PostgreSQL·Kafka를 함께 실행합니다. Docker Compose v2.20 
 
 2. [예매 화면](http://localhost:3000/ticketing.html)을 열고 열차와 좌석을 선택해 예매합니다.
 3. 예매 결과 화면에서 **처리 기록 보기**를 누릅니다.
-
-*(예시)*
-
-![예약 번호별 Redis 좌석 선점·해제, PostgreSQL 예약 저장, Kafka 이벤트 발행 및 결제·알림 처리 시각](docs/images/booking-trace-example.png)
 
 [자동 검증과 종료 방법](projects/phase-2/README.md#로컬에서-예매-흐름-실행)
