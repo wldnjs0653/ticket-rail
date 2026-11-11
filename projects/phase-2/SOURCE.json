@@ -604,7 +604,7 @@
       "destination": "src/public/login.html",
       "git_mode": "0o664",
       "source_sha256": "272d55e67be9435996ec6922eccdfceb6a507e1f0d492f0890fe0c3241693689",
-      "portfolio_sha256": "0116aa64679c3695b8efad0a0c126049da0b0a5c4b201062a78c8b924cb18a41"
+      "portfolio_sha256": "cb56b8807a85013ba5c14816e96ae2b9174d7f542c43eeb4152efb6720e74cd4"
     },
     {
       "source": "src/public/payment-status.js",
@@ -618,7 +618,7 @@
       "destination": "src/public/ticketing.html",
       "git_mode": "0o664",
       "source_sha256": "715e25010c7ccf35642c021580b000be05867ddfb973235e8d29231275defdfc",
-      "portfolio_sha256": "1d4ced686b5967e2c944fe587f4d50ebe1b474141e59049dad4e742e5910cffb"
+      "portfolio_sha256": "5529e85881027e353bee620a734af300117568a4dda69cd480eaa663607188b9"
     },
     {
       "source": "src/routes/auth.js",
