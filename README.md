@@ -2,7 +2,7 @@
 
 Kubernetes 기반 열차 예매 서비스의 애플리케이션, 인프라, 시험 코드입니다.
 
-[노션 포트폴리오 · 구성 설명과 시연 영상](https://app.notion.com/p/TicketRail-40f7416fb05f81e4bdfaeedf3dcbaebb?pvs=12)
+[구성 설명과 시연 영상](https://app.notion.com/p/TicketRail-40f7416fb05f81e4bdfaeedf3dcbaebb?pvs=12)
 
 ## 소스 코드
 
