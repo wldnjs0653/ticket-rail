@@ -27,18 +27,19 @@
 *Windows에서는 Docker Desktop을 사용합니다.*
 
 1. **Docker Desktop**을 열고 Docker 엔진이 시작될 때까지 기다립니다.
-2. **PowerShell**을 열고 아래 명령을 복사해 붙여넣은 뒤 실행합니다.
+2. **PowerShell**을 열고 아래 명령을 실행합니다. 첫 줄은 저장소를 Windows 사용자 폴더에 처음 복제할 때만 실행합니다.
 
    ```powershell
-   git clone https://github.com/wldnjs0653/ticket-rail.git
-   cd ticket-rail/projects/phase-2
-   docker compose -f docker-compose.local.yml up --build --wait --wait-timeout 240
+   git clone https://github.com/wldnjs0653/ticket-rail.git "$HOME\ticket-rail"
+   docker compose -f "$HOME\ticket-rail\projects\phase-2\docker-compose.local.yml" up --build --wait --wait-timeout 240
    ```
+
+   저장소를 다른 폴더에 복제했다면 실행 및 종료 명령에 그 폴더의 `docker-compose.local.yml` 전체 경로를 사용합니다.
 
 3. [예매 화면](http://localhost:3000/ticketing.html)을 열고 열차와 좌석을 선택해 예매합니다.
 4. 예매 결과 화면에서 **처리 기록 보기**를 누릅니다.
-5. 체험을 마치면 같은 **PowerShell** 창에서 아래 명령을 실행해 서비스를 종료합니다.
+5. 체험을 마치면 **PowerShell**에서 아래 명령으로 서비스를 종료합니다. 새 창을 열어도 같은 명령을 사용할 수 있습니다.
 
    ```powershell
-   docker compose -f docker-compose.local.yml down
+   docker compose -f "$HOME\ticket-rail\projects\phase-2\docker-compose.local.yml" down
    ```
