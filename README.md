@@ -6,10 +6,10 @@
 
 ## 프로젝트와 소스 코드
 
-| 프로젝트 | 소스 코드 |
+| 프로젝트 | 이름 |
 | --- | --- |
-| [1차 · 온프레미스 구축](docs/first-project.md) | [예매 서비스](src) · [Kubernetes](k8s) · [CI/CD](.github/workflows/ci.yml) |
-| [2차 · 클라우드 확장](docs/second-project.md) | [결제·알림 Consumer](projects/phase-2/src/consumers) · [배포·검증 코드](projects/phase-2/README.md#코드-찾아보기) |
+| 1차 | [Kubernetes 기반 열차 예매 인프라 구축](docs/first-project.md) |
+| 2차 | [열차 예매 인프라의 클라우드 확장 및 성능 검증](docs/second-project.md) |
 
 ## 직접 실행해 보기
 
