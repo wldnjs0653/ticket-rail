@@ -4,12 +4,16 @@
 
 [프로젝트 상세](https://app.notion.com/p/TicketRail-40f7416fb05f81e4bdfaeedf3dcbaebb?pvs=12)
 
+---
+
 ## 프로젝트 구분
 
 | 프로젝트 | 이름 |
 | --- | --- |
 | 1차 | [Kubernetes 기반 열차 예매 인프라 구축](docs/first-project.md) |
 | 2차 | [열차 예매 인프라의 클라우드 확장 및 성능 검증](docs/second-project.md) |
+
+---
 
 ## 직접 실행해 보기
 
