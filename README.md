@@ -36,5 +36,8 @@
 
 2. [예매 화면](http://localhost:3000/ticketing.html)을 열고 열차와 좌석을 선택해 예매합니다.
 3. 예매 결과 화면에서 **처리 기록 보기**를 누릅니다.
+4. 체험을 마치면 같은 **PowerShell** 창에서 아래 명령을 실행해 서비스를 종료합니다.
 
-[자동 검증과 종료 방법](projects/phase-2/README.md#로컬에서-예매-흐름-실행)
+   ```powershell
+   docker compose -f docker-compose.local.yml down
+   ```
