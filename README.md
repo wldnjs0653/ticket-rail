@@ -4,7 +4,7 @@
 
 [프로젝트 상세](https://app.notion.com/p/TicketRail-40f7416fb05f81e4bdfaeedf3dcbaebb?pvs=12)
 
-## 프로젝트와 소스 코드
+## 프로젝트 구분
 
 | 프로젝트 | 이름 |
 | --- | --- |
