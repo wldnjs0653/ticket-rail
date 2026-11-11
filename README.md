@@ -17,7 +17,7 @@ Kubernetes 기반 열차 예매 서비스의 소스 코드와 배포 구성입�
 
 별도 설치 없이 브라우저에서 샘플 데이터로 예매 화면을 체험할 수 있습니다.
 
-[저장소 ZIP 다운로드](https://github.com/wldnjs0653/ticket-rail/archive/refs/heads/main.zip) 후 압축을 풀고, `projects/phase-2/src/public/ticketing.html`을 더블클릭하세요. 체험을 마치면 탭을 닫으면 됩니다.
+[저장소 ZIP 다운로드](https://github.com/wldnjs0653/ticket-rail/archive/refs/heads/main.zip) 후 압축을 풀고, 폴더 첫 화면의 **`preview.html`**을 더블클릭하면 예매 화면이 열립니다.
 
 ### 2. Docker Compose로 실행
 
