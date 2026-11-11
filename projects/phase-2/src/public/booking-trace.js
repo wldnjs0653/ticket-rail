@@ -1,6 +1,5 @@
 const token = window.location.hash.slice(1);
 const bookingLabel = document.getElementById('booking');
-const seatLabel = document.getElementById('seat');
 const timeline = document.getElementById('stages');
 const statusLabel = document.getElementById('status');
 const retryButton = document.getElementById('retry');
@@ -9,9 +8,9 @@ const clock = new Intl.DateTimeFormat('ko-KR', {
 });
 
 const stages = [
-  { id: 'seatHeld', name: 'Redis', icon: 'redis', describe: (trace, stage) => `${trace.seat} 좌석 선점 · 설정 TTL ${stage.ttlSeconds}초` },
+  { id: 'seatHeld', name: 'Redis', icon: 'redis', describe: (_trace, stage) => `좌석 선점 · 유효 시간 ${stage.ttlSeconds}초` },
   { id: 'bookingStored', name: 'PostgreSQL', icon: 'postgresql', describe: trace => `예약 ${trace.bookingId}번 저장` },
-  { id: 'seatReleased', name: 'Redis', icon: 'redis', describe: trace => `${trace.seat} 좌석 선점 해제` },
+  { id: 'seatReleased', name: 'Redis', icon: 'redis', describe: () => '좌석 선점 해제' },
   { id: 'bookingPublished', name: 'Kafka', icon: 'kafka', describe: () => 'booking.created 발행' },
   { id: 'paymentApproved', name: '결제 Consumer', describe: () => '테스트 결제 승인' },
   { id: 'paymentPublished', name: 'Kafka', icon: 'kafka', describe: () => 'payment.completed 발행' },
@@ -56,7 +55,6 @@ function showStatus(message, state = '', canRetry = false) {
 function render(trace) {
   bookingLabel.hidden = false;
   bookingLabel.textContent = `예약 번호 ${trace.bookingId}`;
-  seatLabel.textContent = `${trace.seat} 좌석 · 처리 시각은 한국 시간 기준입니다.`;
   const events = trace.stages;
   const complete = Boolean(events.notificationSent && events.paymentPublished && events.paymentApproved && events.bookingPublished);
   const ordered = stages.map(step => {

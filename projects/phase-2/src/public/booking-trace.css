@@ -30,10 +30,10 @@ a { color: #264e91; text-underline-offset: 0.2em; }
 
 .navigation strong { font-size: 1.35rem; }
 .heading { margin: 2rem 0 1.5rem; flex-wrap: wrap; }
-.heading h1 { margin: 0 0 0.55rem; font-size: clamp(1.8rem, 4vw, 2.8rem); }
-.heading p { margin: 0; color: #4c5e79; }
+.heading h1 { margin: 0; font-size: clamp(1.8rem, 4vw, 2.8rem); }
 
 .heading .booking {
+  margin: 0;
   padding: 0.6rem 0.85rem;
   border: 1px solid #c5d3e8;
   border-radius: 0.6rem;
