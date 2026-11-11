@@ -44,7 +44,12 @@ async function main() {
   await request(`/seats/${seat.id}/hold`, {
     body: { event_id: eventId, user_id: 1 }, key: 'hold',
   });
-  const bookingBody = { event_id: eventId, seat_id: seat.id, user_id: 1 };
+  const seatsPerCoach = Math.ceil(seats.length / 5);
+  const seatIndex = seats.indexOf(seat);
+  const coach = Math.floor(seatIndex / seatsPerCoach) + 1;
+  const seatInCoach = seatIndex % seatsPerCoach;
+  const seatLabel = `${coach}호차 ${Math.floor(seatInCoach / 4) + 1}${'ABCD'[seatInCoach % 4]}`;
+  const bookingBody = { event_id: eventId, seat_id: seat.id, user_id: 1, demo_seat_label: seatLabel };
   const booking = await request('/bookings', {
     body: bookingBody, key: 'booking', statuses: [201],
   });
@@ -68,6 +73,7 @@ async function main() {
       const trace = await request('/demo/booking-trace', { traceToken: booking.demo_trace_token });
       assert.equal(trace.bookingId, booking.booking_id);
       assert.equal(trace.seat, stored.seats[0].seat_code);
+      assert.equal(trace.seatLabel, seatLabel);
       const stageIds = ['seatHeld', 'bookingStored', 'seatReleased', 'bookingPublished', 'paymentApproved', 'paymentPublished', 'notificationSent'];
       if (stageIds.every(stage => Number.isFinite(Date.parse(trace.stages[stage]?.at)))) {
         assert.ok(trace.stages.seatHeld.ttlSeconds > 0);

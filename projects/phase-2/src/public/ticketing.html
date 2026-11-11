@@ -2461,6 +2461,10 @@
       return seat?.display_code || seat?.seat_code || '-';
     }
 
+    function seatLocationLabel(seat) {
+      return `${seat.coach_no || selectedCoach}호차 ${seatDisplayCode(seat)}`;
+    }
+
     // 모든 호차는 KTX 일반실 기준 A·B | C·D, 10행으로 고정해 그린다.
     // 운영 DB의 내부 seat_code는 API 호출에 유지하고 화면에는 1A~10D만 표시한다.
     function renderSeats() {
@@ -2755,7 +2759,12 @@
       if (!holdData || !selectedTrain) return;
 
       const res = await call('POST', '/bookings', {
-        body: { event_id: selectedTrain.eventId, seat_id: holdData.seat.id, user_id: USER_ID },
+        body: {
+          event_id: selectedTrain.eventId,
+          seat_id: holdData.seat.id,
+          user_id: USER_ID,
+          demo_seat_label: seatLocationLabel(holdData.seat),
+        },
         idemPrefix: 'b',
       });
 
@@ -2816,7 +2825,6 @@
 
       const b = bookingData;
       const gradeLabel = (b.seat.grade && b.seat.grade !== 'STANDARD') ? b.seat.grade : '일반';
-      const coachLabel = `${b.seat.coach_no || selectedCoach}호차`;
 
       visual.innerHTML = `
         <ol class="payment-flow" aria-label="예매 진행 단계">
@@ -2845,7 +2853,7 @@
             <div class="complete-trip-duration">${b.train.dur}</div>
           </div>
           <div class="complete-meta">
-            <div><span>좌석정보</span><strong>${coachLabel} ${seatDisplayCode(b.seat)} (${gradeLabel}실)</strong></div>
+            <div><span>좌석정보</span><strong>${seatLocationLabel(b.seat)} (${gradeLabel}실)</strong></div>
             <div><span>${approved ? '결제금액' : '결제 요청 금액'}</span><strong>${Number(approved ? b.payment.amount : (b.seat.price ?? b.train.price)).toLocaleString()}원</strong></div>
             <div><span>승객정보</span><strong>홍길동 (성인 ${b.pax}명)</strong></div>
             <div><span>결제상태</span><strong id="paymentLine">${approved ? '승인 완료' : failed ? '승인 실패' : '승인 결과 확인 중'}</strong></div>

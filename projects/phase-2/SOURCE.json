@@ -618,7 +618,7 @@
       "destination": "src/public/ticketing.html",
       "git_mode": "0o664",
       "source_sha256": "715e25010c7ccf35642c021580b000be05867ddfb973235e8d29231275defdfc",
-      "portfolio_sha256": "bd5efc4c20f2d98d089424db7c6064d58c53c2412867f2aaca445bb435984430"
+      "portfolio_sha256": "1d4ced686b5967e2c944fe587f4d50ebe1b474141e59049dad4e742e5910cffb"
     },
     {
       "source": "src/routes/auth.js",
@@ -632,7 +632,7 @@
       "destination": "src/routes/booking.js",
       "git_mode": "0o664",
       "source_sha256": "e8c2ca3a9ed3378c5b6e721da873385d9291ba849544a293b11db136a8e56041",
-      "portfolio_sha256": "18bc92842558aea585049ee137bc300f81a93d622f1875d8fba99b5f8d2048d5"
+      "portfolio_sha256": "385582fb0f6b1c852a777921f43bfbeaed1dcc47896926969c315db658010ace"
     },
     {
       "source": "src/routes/event.js",

@@ -7,14 +7,18 @@ const clock = new Intl.DateTimeFormat('ko-KR', {
   timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
 });
 
+function seatDescription(trace) {
+  return trace.seatLabel ? `${trace.seatLabel} 좌석` : '좌석';
+}
+
 const stages = [
-  { id: 'seatHeld', name: 'Redis', icon: 'redis', describe: (_trace, stage) => `좌석 선점 · 유효 시간 ${stage.ttlSeconds}초` },
+  { id: 'seatHeld', name: 'Redis', icon: 'redis', describe: (trace, stage) => `${seatDescription(trace)} 선점 · 유효 시간 ${stage.ttlSeconds}초` },
   { id: 'bookingStored', name: 'PostgreSQL', icon: 'postgresql', describe: trace => `예약 ${trace.bookingId}번 저장` },
-  { id: 'seatReleased', name: 'Redis', icon: 'redis', describe: () => '좌석 선점 해제' },
+  { id: 'seatReleased', name: 'Redis', icon: 'redis', describe: trace => `${seatDescription(trace)} 선점 해제` },
   { id: 'bookingPublished', name: 'Kafka', icon: 'kafka', describe: () => 'booking.created 발행' },
-  { id: 'paymentApproved', name: '결제 Consumer', describe: () => '테스트 결제 승인' },
+  { id: 'paymentApproved', name: '결제 Consumer', describe: () => '결제 승인' },
   { id: 'paymentPublished', name: 'Kafka', icon: 'kafka', describe: () => 'payment.completed 발행' },
-  { id: 'notificationSent', name: '알림 Consumer', describe: () => '테스트 알림 처리 완료' },
+  { id: 'notificationSent', name: '알림 Consumer', describe: () => '알림 처리 완료' },
 ];
 
 function createRow(step, event, trace, state) {
@@ -70,7 +74,7 @@ function render(trace) {
     return true;
   }
   if (complete) {
-    showStatus(`예약 ${trace.bookingId}번의 테스트 결제·알림 처리 완료`, 'complete');
+    showStatus(`예약 ${trace.bookingId}번 처리 완료`, 'complete');
     return true;
   }
   showStatus('결제·알림 처리 기록을 확인하고 있습니다.');

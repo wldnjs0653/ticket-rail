@@ -40,12 +40,14 @@ function record(bookingId, stage, details = {}) {
   if (trace) trace.stages[stage] ??= { at: new Date().toISOString(), ...details };
 }
 
-function start(bookingId, seat, hold) {
+function start(bookingId, seat, hold, seatLabel) {
   if (!enabled) return;
   const trace = {
     token: randomUUID(),
     bookingId,
     seat,
+    // This is display metadata only. The booking and hold still use the persisted seat ID.
+    seatLabel: typeof seatLabel === 'string' && /^[1-5]호차 (?:[1-9]|10)[A-D]$/.test(seatLabel) ? seatLabel : undefined,
     expiresAt: Date.now() + lifetimeMs,
     stages: {},
   };
@@ -59,7 +61,7 @@ function read(token) {
   if (!enabled || typeof token !== 'string' || !/^[0-9a-f-]{36}$/.test(token)) return;
   for (const [bookingId, trace] of traces) {
     if (trace.token === token && findBooking(bookingId)) {
-      return { bookingId: trace.bookingId, seat: trace.seat, stages: trace.stages };
+      return { bookingId: trace.bookingId, seat: trace.seat, seatLabel: trace.seatLabel, stages: trace.stages };
     }
   }
 }

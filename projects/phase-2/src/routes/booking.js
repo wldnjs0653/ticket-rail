@@ -49,7 +49,7 @@ const { bookingTotal, idempotencyTotal } = require('../metrics');
 // app_user 테이블에 이미 존재하는 id(정수)라고 가정한다. 테스트할 때는
 // app_user에 미리 행을 하나 넣어두고 그 id를 써야 한다 (test/seed.sql 참고).
 router.post('/', idempotency(), async (req, res) => {
-  const { event_id, seat_id, user_id } = req.body || {};
+  const { event_id, seat_id, user_id, demo_seat_label } = req.body || {};
   // Idempotency-Key 헤더 값을 그대로 booking.idempotency_key에 저장한다.
   // 이 값이 없으면 idempotency() 미들웨어가 이미 400으로 막아주므로 여기선 항상 존재.
   const idempotencyKey = req.get('Idempotency-Key');
@@ -149,7 +149,7 @@ router.post('/', idempotency(), async (req, res) => {
     );
 
     await client.query('COMMIT');
-    traceToken = demoBookingTrace.start(bookingId, seatUpdate.rows[0].seat_code, holdTrace);
+    traceToken = demoBookingTrace.start(bookingId, seatUpdate.rows[0].seat_code, holdTrace, demo_seat_label);
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('[booking] transaction failed:', err.message);
