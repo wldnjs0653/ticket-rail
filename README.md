@@ -13,14 +13,14 @@
 
 ## 로컬 데모
 
-### 1. HTML 미리보기 · 설치 없이 체험
+### 1. 예매 체험하기
 
 샘플 데이터로 열차 조회부터 결제 완료 화면까지 체험할 수 있습니다.
 
 1. [미리보기 ZIP](https://github.com/wldnjs0653/ticket-rail/releases/download/html-preview-v1/TicketRail-preview.zip)을 다운로드한 뒤 압축을 풉니다.
 2. 압축을 푼 폴더에서 **`preview.html`**을 더블클릭합니다.
 
-### 2. Docker Compose · 서비스 연동 확인
+### 2. 서비스 연동 확인
 
 API와 Redis·PostgreSQL·Kafka를 함께 실행합니다. Docker Compose v2.20 이상과 Linux 컨테이너 환경이 필요합니다.
 
