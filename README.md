@@ -1,30 +1,26 @@
-### TicketRail
+# TicketRail
 
 온프레미스 Kubernetes에서 구축하고 클라우드로 확장한 열차 예매 서비스입니다.
 
 [프로젝트 상세](https://app.notion.com/p/TicketRail-40f7416fb05f81e4bdfaeedf3dcbaebb?pvs=12)
 
----
-
-### 프로젝트 구분
+## 프로젝트 구분
 
 | 프로젝트 | 이름 |
 | --- | --- |
 | 1차 | [Kubernetes 기반 열차 예매 인프라 구축](docs/first-project.md) |
 | 2차 | [열차 예매 인프라의 클라우드 확장 및 성능 검증](docs/second-project.md) |
 
----
+## 직접 실행해 보기
 
-### 직접 실행해 보기
-
-#### 1. 예매 체험
+### 1. 예매 체험
 
 ![TicketRail 미리보기의 열차 조회 화면](docs/images/booking-preview-example.png)
 
 1. [미리보기 ZIP](https://github.com/wldnjs0653/ticket-rail/releases/download/html-preview-v1/TicketRail-preview.zip)을 다운로드한 뒤 압축을 풉니다.
 2. 압축을 푼 폴더에서 **`preview.html`**을 더블클릭합니다.
 
-#### 2. 서비스 연동 확인
+### 2. 서비스 연동 확인
 
 ![예약 번호별 Redis 좌석 선점·해제, PostgreSQL 예약 저장, Kafka 이벤트 발행 및 결제·알림 처리 시각](docs/images/booking-trace-example.png)
 
