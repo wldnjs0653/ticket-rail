@@ -23,9 +23,10 @@
 
 - **팀 운영:** 범위·일정·역할 조율, 기술 이슈와 결과 공유
 - **설계:** 전체 논리 아키텍처와 구성 요소 연결 방식 정의
+- **CI/CD:** 팀원이 진행하던 작업을 인수해 GitHub Actions·GHCR·Self-hosted Runner·Ansible을 연결한 배포 파이프라인을 완성하고, Rolling Update와 헬스 체크로 배포 결과 확인
 - **검증:** 기능·동시성·부하·장애 시험 설계·수행·분석, 보고서·발표 자료 정리
 
-Backend 개발, Kubernetes HA·CI/CD 세부 구현과 모니터링은 팀원이 담당했으며, 개인 기여는 설계와 시험·통합 검증을 중심으로 소개합니다.
+Backend 개발, Kubernetes HA 세부 구현과 모니터링은 팀원이 담당했습니다.
 
 ## 구성과 처리 흐름
 
@@ -133,20 +134,17 @@ Worker 장애 시험은 노드 식별용 경량 Probe를 사용했으며 실제 
 
 ## 코드와 실행
 
-[애플리케이션](../src) · [배포 구성](../k8s) · [자동화](../ansible) · [시험](../tests)
+[애플리케이션](../src) · [배포 구성](../k8s) · [CI/CD 워크플로](../.github/workflows/ci.yml) · [Ansible 배포](../ansible/deploy/backend.yml) · [k6 E2E 시나리오](../tests/load/k6/scenarios/e2e.js)
 
 ### 로컬 실행
 
-저장소 루트에서 실행합니다. Kubernetes 배포·부하·장애 시험 자료는 위 코드 링크에서 확인할 수 있습니다.
+예매부터 결제·알림까지 체험하려면 [2차 Docker Compose 실행 안내](../projects/phase-2/README.md#로컬에서-예매-흐름-실행)를 따르세요. 1차의 [Compose 파일](../docker-compose.local.yml)은 당시 구성을 보존한 자료입니다. 해당 파일이 지정한 `bitnami/kafka:3.7` 이미지는 현재 레지스트리에서 조회되지 않습니다.
 
-```bash
-cp .env.example .env
-docker compose -f docker-compose.local.yml up -d
-npm ci
+1차 코드의 이벤트 계약 테스트는 Node.js 20 환경에서 저장소 루트를 기준으로 실행합니다.
+
+```sh
+npm ci --ignore-scripts
 npm test
-npm start
 ```
-
-`.env`는 로컬 개발용 예시를 기반으로 생성하며 Git에 포함되지 않습니다.
 
 [전체 소개](../README.md) · [2차 프로젝트: 확장·성능 개선](second-project.md)

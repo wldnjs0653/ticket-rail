@@ -2,13 +2,13 @@
 
 TicketRail의 2차 프로젝트 공동 작업 소스를 별도 폴더로 보관했습니다. 온프레미스 서비스의 Consumer 병렬 처리, Redis·PostgreSQL 장애 대응, ROSA 배포와 KEDA 자동 확장, 날짜별 열차 조회와 결제 상태 화면을 확인할 수 있습니다.
 
-[프로젝트 소개](../../docs/second-project.md) · [전체 포트폴리오](../../README.md) · [1차 애플리케이션 코드](../../src) · [1차 배포 자료](../../k8s)
+[프로젝트 소개](../../docs/second-project.md) · [저장소 홈](../../README.md) · [1차 애플리케이션 코드](../../src) · [1차 배포 자료](../../k8s)
 
 ## 출처와 팀 기여
 
-- 원본 저장소: [jisoo9123/ticketing-project](https://github.com/jisoo9123/ticketing-project)
+- 원본 저장소: `jisoo9123/ticketing-project` ([원본 주소·파일별 출처](SOURCE.json))
 - 가져온 브랜치: `fix/payment-delay-confirmation-ui`
-- 기준 커밋: [`3a97332d37dad13485b9bcc450d84d0a5988526c`](https://github.com/jisoo9123/ticketing-project/commit/3a97332d37dad13485b9bcc450d84d0a5988526c)
+- 기준 커밋: `3a97332d37dad13485b9bcc450d84d0a5988526c`
 - 해당 커밋 작성일: 2026.10.15
 - 반영일: 2026.10.28
 
@@ -17,6 +17,8 @@ TicketRail의 2차 프로젝트 공동 작업 소스를 별도 폴더로 보관�
 파일별 원본 경로, 체크섬과 제외한 백업 목록은 [SOURCE.json](SOURCE.json)에 기록했습니다. 애플리케이션과 배포 소스는 위 커밋의 스냅샷이며, 로컬 체험용 Compose·스키마·샘플 데이터·검증 스크립트는 포트폴리오에서 보완했습니다. 이후 공동 저장소 변경을 자동으로 가져오지는 않습니다.
 
 ## 코드 찾아보기
+
+배포 코드에는 온프레미스와 ROSA 구성이 포함됩니다. Terraform 파일과 Full AWS 최종 부하 시험의 전체 설정·결과 원본은 가져온 브랜치에 포함되어 있지 않습니다.
 
 | 구분 | 파일과 폴더 |
 | --- | --- |
@@ -98,8 +100,6 @@ Kafka 이미지와 단일 노드 설정은 [Apache Kafka 공식 Docker 안내](h
 로컬 실행은 위 Compose 안내를 사용합니다. `UPSTREAM_README.md`와 과거 스키마는 원본 참고 자료이며, 현재 초기화 파일은 `src/db/schema.sql`과 `local/seed.sql`입니다. 위 단위 테스트는 외부 데이터베이스 없이 실행되고, `local-demo` 자동 검사는 Compose를 기동해 실제 의존성과 후속 처리를 검증합니다.
 
 원본 GitHub 배포 워크플로는 `ci-reference`에 텍스트로 보관했습니다. 포트폴리오용 자동 검사는 저장소의 `phase-2-ci.yml`이 담당하며, 실제 서버 배포나 이미지 게시를 실행하지 않습니다.
-
-이 소스에 포함된 ROSA·하이브리드 구성과 최종보고서의 Full AWS 시험 자료는 범위가 다릅니다. Terraform 파일 및 Full AWS 최종 설정·부하 결과 원본은 이 브랜치에 포함되어 있지 않습니다.
 
 ## 원본 참고 문서
 

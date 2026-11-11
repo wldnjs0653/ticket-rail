@@ -1,31 +1,51 @@
-# TicketRail | 인프라·클라우드 포트폴리오
+# TicketRail
 
-**Kubernetes 고가용성 인프라 구축 → Consumer 병목 개선 → 클라우드 확장**
+Kubernetes 기반 열차 예매 서비스의 애플리케이션, 인프라, 시험 코드입니다.
 
-대기열·좌석 선점·예약과 Kafka 기반 모의 결제·알림을 처리하는 티켓 예매 서비스입니다. 두 차례 팀장을 맡아 아키텍처 설계, 시험과 시스템 통합 검증을 수행했습니다.
+[노션 포트폴리오 · 구성 설명과 시연 영상](https://app.notion.com/p/TicketRail-40f7416fb05f81e4bdfaeedf3dcbaebb?pvs=12)
 
-## 프로젝트 한눈에 보기
+## 소스 코드
 
-| 구분 | ① 인프라 구축 | ② 확장·성능 개선 |
-| --- | --- | --- |
-| 기간·팀 | 2026.08.25 ~ 09.23 · 4명 | 2026.09.28 ~ 10.26 · 2명 |
-| 환경 | 온프레미스 Kubernetes | 온프레미스 · 하이브리드 · Full AWS |
-| 개인 담당 | 논리 설계 · 시험 계획 · 통합 검증 | Consumer 튜닝 · 성능·복구 개선 · 통합 |
-| 주요 성과 | 대기열 **500 VU** 검증<br>HPA **2 → 6 → 2개** | 예매 흐름(건/초)<br>**온프레미스 31 · 하이브리드 60 · Full AWS 80** |
-| 상세 보기 | [1차 프로젝트](docs/first-project.md) | [2차 프로젝트](docs/second-project.md) |
-| 코드·실행 | [애플리케이션](src) · [배포 구성](k8s) | [2차 코드·로컬 체험](projects/phase-2/README.md) |
+| 구분 | 코드와 문서 |
+| --- | --- |
+| 1차 서비스 | [예매 API와 화면](src) · [결제·알림 서비스](services/async-processing) |
+| 1차 인프라 | [Kubernetes 배포 구성](k8s) · [Ansible 자동화](ansible) |
+| 2차 서비스 | [2차 소스 및 실행 안내](projects/phase-2/README.md) · [결제·알림 Consumer](projects/phase-2/src/consumers) |
+| 2차 배포 | [온프레미스 구성](projects/phase-2/k8s_playbooks/app) · [ROSA 구성](projects/phase-2/k8s_playbooks/rosa) |
 
-2차 장애 비교 시험에서는 Redis **API 복구 약 33 → 7초**, PostgreSQL **Primary 전환 약 183 → 33초**를 확인했습니다.
+2차 배포 코드는 온프레미스와 ROSA 구성을 포함합니다. [Full AWS 시험 자료의 범위](projects/phase-2/README.md#코드-찾아보기)를 참고하세요.
 
-<details>
-<summary><strong>기술·구현 자료 더 보기</strong></summary>
+### 주요 구현 파일
 
-- **구성과 성과:** [1차 상세](docs/first-project.md) · [2차 상세](docs/second-project.md)
-- **1차 구현:** [src](src) · [k8s](k8s) · [ansible](ansible) · [시험 자료](tests)
-- **2차 구현:** [소스·실행·출처](projects/phase-2/README.md) · [원본 공동 저장소](https://github.com/jisoo9123/ticketing-project)
+- **CI/CD** — [GitHub Actions 워크플로](.github/workflows/ci.yml) · [Ansible 배포 플레이북](ansible/deploy/backend.yml)
+- **Consumer 처리** — [결제 Consumer](projects/phase-2/src/consumers/paymentConsumer.js) · [온프레미스 KEDA 설정](projects/phase-2/k8s_playbooks/app/consumer-keda.yaml)
+- **장애 대응** — [Redis 연결 갱신](projects/phase-2/src/clients/redisClient.js) · [PostgreSQL 재시도](projects/phase-2/src/clients/pgClient.js)
+- **E2E 부하 시험** — [1차 k6 시나리오](tests/load/k6/scenarios/e2e.js)
 
-기술: **Linux · Kubernetes · AWS ROSA · Redis · PostgreSQL · Kafka · Ansible · Terraform · GitHub Actions · HPA/KEDA · Prometheus/Grafana · k6**
+## 로컬에서 실행
 
-세부 기술과 팀·개인 기여는 각 프로젝트 문서에 정리했습니다. 결제·알림은 모의 서비스로 검증했습니다.
+Docker Engine 또는 Docker Desktop의 Linux 컨테이너와 Docker Compose v2.20 이상이 필요합니다.
 
-</details>
+```sh
+git clone https://github.com/wldnjs0653/ticket-rail.git
+cd ticket-rail/projects/phase-2
+docker compose -f docker-compose.local.yml up --build --wait --wait-timeout 240
+```
+
+[예매 화면](http://localhost:3000/ticketing.html)을 열거나, 다음 명령으로 예매 흐름을 확인합니다. 로컬 데모의 결제와 알림은 모의 서비스가 처리합니다.
+
+```sh
+docker compose -f docker-compose.local.yml exec -T app node local/smoke.js
+```
+
+체험을 마치면 다음 명령으로 종료합니다.
+
+```sh
+docker compose -f docker-compose.local.yml down
+```
+
+[샘플 데이터와 실행 옵션](projects/phase-2/README.md#로컬에서-예매-흐름-실행) · [GitHub Actions 실행 결과](https://github.com/wldnjs0653/ticket-rail/actions/runs/40608744575)
+
+## 상세 문서와 출처
+
+[1차 프로젝트](docs/first-project.md) · [2차 프로젝트](docs/second-project.md) · [2차 공동 작업 출처와 반영 범위](projects/phase-2/SOURCE.json)

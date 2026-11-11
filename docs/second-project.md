@@ -15,7 +15,7 @@
 | 온프레미스 | Consumer 조정 후 **초당 31건**의 예매 흐름 처리 |
 | 하이브리드 | **초당 60건** 유입 후 예약·모의 결제·알림 완료 |
 | Full AWS | **초당 80건** 유입 후 예약·모의 결제·알림 완료 |
-| Redis | API 복구 **약 33초 → 7초** |
+| Redis | Primary Pod 삭제 시험의 API 복구 **15.92초 → 7.16초** |
 | PostgreSQL | Primary 전환 **약 183초 → 33초** |
 
 결제·알림은 모의 서비스로 검증했습니다. Redis는 API 복구, PostgreSQL은 Primary 전환 시간을 측정했습니다.
@@ -97,7 +97,7 @@ ROSA Worker와 데이터 서비스는 VPC의 Private Subnet에 배치했습니�
 <details>
 <summary><strong>장애 복구·성능 검증 상세 보기</strong></summary>
 
-- **Redis:** Primary 변경 감지·연결 갱신 보완 후 API 복구 **32.961 → 7.081초**. 후속 시험에서 안전한 재시도를 적용했습니다.
+- **Redis:** Primary Pod를 삭제한 뒤 HTTP API가 정상화될 때까지 걸린 시간을 비교했습니다. Primary 변경 감지·연결 갱신을 보완하고 대기열 진입 요청에 동일한 Idempotency-Key로 재시도를 적용한 뒤, API 복구 시간은 **15.92 → 7.16초**, 최종 실패는 **4,801건 중 803 → 0건**이었습니다. (발표자료 21쪽)
 - **PostgreSQL:** CNPG 종료 대기 설정 조정 후 Primary 전환 **183.42 → 32.98초**. 데이터 마커 보존과 API 정상화를 확인했습니다.
 - **Full AWS:** HTTP 실패·Dropped Iteration·Flow Failure **각 0건**, 종료 시 결제·알림 Consumer Group Lag **각 0**.
 - **DR:** 온프레미스 애플리케이션 장애 시 CloudWatch·Route 53을 통한 AWS 전환과 온프레미스 복귀를 팀에서 검증했습니다.
@@ -125,6 +125,8 @@ ROSA Worker와 데이터 서비스는 VPC의 Private Subnet에 배치했습니�
 
 [2차 코드·실행 안내](../projects/phase-2/README.md) · [Consumer](../projects/phase-2/src/consumers) · [장애 대응 코드](../projects/phase-2/src/clients) · [로컬 실행 검증](https://github.com/wldnjs0653/ticket-rail/actions/runs/40608744575)
 
+배포 코드에는 온프레미스와 ROSA 구성이 포함됩니다. Terraform 파일과 Full AWS 최종 부하 시험의 전체 설정·결과 원본은 가져온 브랜치에 포함되어 있지 않습니다.
+
 <details>
 <summary><strong>구현 파일·출처 보기</strong> — 배포 구성과 원본 범위</summary>
 
@@ -141,9 +143,7 @@ ROSA Worker와 데이터 서비스는 VPC의 Private Subnet에 배치했습니�
 | PostgreSQL 장애 전환 설정 | [postgresql.yml](../projects/phase-2/Data_Monitoring_playbooks/postgresql.yml) |
 | 원본 경로와 체크섬 | [SOURCE.json](../projects/phase-2/SOURCE.json) |
 
-원본은 [공동 저장소](https://github.com/jisoo9123/ticketing-project)의 `fix/payment-delay-confirmation-ui` 브랜치이며, [커밋 `3a97332`](https://github.com/jisoo9123/ticketing-project/commit/3a97332d37dad13485b9bcc450d84d0a5988526c)을 기준으로 반영했습니다. 원본 저자와 팀 공동 기여를 유지하고 개인 담당 업무를 위에 구분했습니다.
-
-Terraform 파일과 Full AWS 최종 성능 시험의 전체 설정·결과 원본은 이 소스 브랜치에 포함되어 있지 않습니다. 가져온 구현 자료와 보고서의 시험 성과를 구분해 소개합니다.
+공동 저장소 `jisoo9123/ticketing-project`의 `fix/payment-delay-confirmation-ui` 브랜치에서 커밋 `3a97332`를 기준으로 가져왔습니다. 원본 주소와 전체 커밋 ID는 [출처 기록](../projects/phase-2/SOURCE.json)에 있습니다.
 
 </details>
 
