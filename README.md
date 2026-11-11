@@ -24,7 +24,7 @@
 
 ![예약 번호별 Redis 좌석 선점·해제, PostgreSQL 예약 저장, Kafka 이벤트 발행 및 결제·알림 처리 시각](docs/images/booking-trace-example.png)
 
-*Windows에서는 Docker Desktop의 Linux 컨테이너 모드를 사용합니다.*
+*Windows에서는 Docker Desktop을 사용합니다.*
 
 1. **Docker Desktop**을 열고 Docker 엔진이 시작될 때까지 기다립니다.
 2. **PowerShell**을 열고 아래 명령을 복사해 붙여넣은 뒤 실행합니다.
