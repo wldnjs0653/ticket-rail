@@ -10,7 +10,7 @@
 |---|---|:---:|
 | **온프레미스 구성** | API·Consumer 배포와 KEDA 자동 확장 설정 | [보기](../projects/phase-2/k8s_playbooks/app) |
 | **하이브리드 구성** | AWS ROSA의 Consumer 배포와 KEDA 자동 확장 설정 | [보기](../projects/phase-2/k8s_playbooks/rosa) |
-| **Full AWS 구성도** | ROSA, ElastiCache for Valkey, RDS, MSK 연결 구조 | [보기](images/phase-2/full-aws-architecture.png) |
+| **Full AWS 구성** | ROSA, ElastiCache for Valkey, RDS, MSK 연결 구조 | [보기](images/phase-2/full-aws-architecture.png) |
 
 환경별 처리 흐름과 시험 결과는 상단의 **프로젝트 상세**에서 확인할 수 있습니다.
 
