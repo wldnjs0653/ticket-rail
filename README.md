@@ -17,7 +17,7 @@
 
 샘플 데이터로 열차 조회부터 결제 완료 화면까지 체험할 수 있습니다.
 
-1. [미리보기 전용 ZIP 다운로드](https://github.com/wldnjs0653/ticket-rail/releases/download/html-preview-v1/TicketRail-preview.zip) 후 압축을 풉니다.
+1. [미리보기 ZIP](https://github.com/wldnjs0653/ticket-rail/releases/download/html-preview-v1/TicketRail-preview.zip)을 다운로드한 뒤 압축을 풉니다.
 2. 압축을 푼 폴더에서 **`preview.html`**을 더블클릭합니다.
 
 ### 2. Docker Compose · 서비스 연동 확인
