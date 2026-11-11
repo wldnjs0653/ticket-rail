@@ -1,4 +1,4 @@
-# TicketRail 1차 · 온프레미스 구축
+# TicketRail 온프레미스 인프라 구축
 
 온프레미스에 Kubernetes 기반의 열차 예매 인프라를 구축하고, 서비스가 안정적으로 동작하는지 검증했습니다.
 
@@ -21,4 +21,4 @@
 | **장애 대응** | Pod·노드·데이터 계층의 장애 전환과 복구 확인 | [장애 시험 시나리오](../tests/failure) |
 | **CI/CD** | GitHub Actions와 Ansible을 연계한 배포 자동화 및 배포 결과 확인 | [워크플로](../.github/workflows/ci.yml) · [배포 플레이북](../ansible/deploy/backend.yml) |
 
-[저장소 첫 화면](../README.md)
+[이전 첫 화면](../README.md)
