@@ -28,16 +28,16 @@
 
 API와 Redis·PostgreSQL·Kafka를 함께 실행합니다. Docker Compose v2.20 이상과 Linux 컨테이너 환경이 필요합니다.
 
-Windows에서는 **PowerShell**을 열고 아래 명령을 복사해 붙여넣은 뒤 실행합니다.
+1. Windows에서는 **PowerShell**을 열고 아래 명령을 복사해 붙여넣은 뒤 실행합니다.
 
-```powershell
-git clone https://github.com/wldnjs0653/ticket-rail.git
-cd ticket-rail/projects/phase-2
-docker compose -f docker-compose.local.yml up --build --wait --wait-timeout 240
-```
+   ```powershell
+   git clone https://github.com/wldnjs0653/ticket-rail.git
+   cd ticket-rail/projects/phase-2
+   docker compose -f docker-compose.local.yml up --build --wait --wait-timeout 240
+   ```
 
-1. [예매 화면](http://localhost:3000/ticketing.html)을 열고 열차와 좌석을 선택해 예매합니다.
-2. 예매 결과 화면에서 **처리 기록 보기**를 누릅니다.
+2. [예매 화면](http://localhost:3000/ticketing.html)을 열고 열차와 좌석을 선택해 예매합니다.
+3. 예매 결과 화면에서 **처리 기록 보기**를 누릅니다.
 
 *(예시)*
 
