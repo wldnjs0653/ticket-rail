@@ -11,7 +11,7 @@
 | [1차 · 온프레미스 구축](docs/first-project.md) | [예매 서비스](src) · [Kubernetes](k8s) · [CI/CD](.github/workflows/ci.yml) |
 | [2차 · 클라우드 확장](docs/second-project.md) | [결제·알림 Consumer](projects/phase-2/src/consumers) · [배포·검증 코드](projects/phase-2/README.md#코드-찾아보기) |
 
-## 로컬 데모
+## 직접 실행해 보기
 
 ### 1. 예매 체험하기
 
