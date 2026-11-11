@@ -13,7 +13,7 @@
 
 ## 직접 실행해 보기
 
-### 1. 예매 체험하기
+### 1. 예매 체험
 
 ![TicketRail 미리보기의 열차 조회 화면](docs/images/booking-preview-example.png)
 
