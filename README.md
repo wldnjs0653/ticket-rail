@@ -33,10 +33,8 @@ docker compose -f docker-compose.local.yml up --build --wait --wait-timeout 240
 1. [예매 화면](http://localhost:3000/ticketing.html)을 열고 열차와 좌석을 선택해 예매합니다.
 2. 예매 결과 화면에서 **처리 기록 보기**를 누릅니다.
 
-처리 기록에는 같은 예약 번호로 다음 단계의 처리 시각이 표시됩니다.
+*처리 기록 화면 예시*
 
-- **Redis** · 선택한 좌석의 선점과 해제
-- **PostgreSQL** · 예약 저장
-- **Kafka** · 이벤트 발행과 결제·알림 Consumer 처리
+![예약 번호별 Redis 좌석 선점·해제, PostgreSQL 예약 저장, Kafka 이벤트 발행 및 결제·알림 처리 시각](docs/images/booking-trace-example.png)
 
-결제와 알림은 모의 처리입니다. [자동 검증과 종료 방법](projects/phase-2/README.md#로컬에서-예매-흐름-실행)
+[자동 검증과 종료 방법](projects/phase-2/README.md#로컬에서-예매-흐름-실행)
