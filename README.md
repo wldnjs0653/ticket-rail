@@ -15,14 +15,10 @@
 
 ### 1. 예매 체험하기
 
-샘플 데이터로 열차 조회부터 결제 완료 화면까지 체험할 수 있습니다.
+![TicketRail 미리보기의 열차 조회 화면](docs/images/booking-preview-example.png)
 
 1. [미리보기 ZIP](https://github.com/wldnjs0653/ticket-rail/releases/download/html-preview-v1/TicketRail-preview.zip)을 다운로드한 뒤 압축을 풉니다.
 2. 압축을 푼 폴더에서 **`preview.html`**을 더블클릭합니다.
-
-*(예시)*
-
-![TicketRail 미리보기의 열차 조회 화면](docs/images/booking-preview-example.png)
 
 ### 2. 서비스 연동 확인
 
