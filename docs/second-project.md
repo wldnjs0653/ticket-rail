@@ -4,14 +4,15 @@
 
 [프로젝트 상세](https://app.notion.com/p/TicketRail-40f7416fb05f81e4bdfaeedf3dcbaebb?pvs=12)
 
-## 인프라 구축 코드
+## 인프라 구축 자료
 
 | 항목 | 확인할 내용 | 바로가기 |
 |---|---|:---:|
 | **온프레미스 구성** | API·Consumer 배포와 KEDA 자동 확장 설정 | [보기](../projects/phase-2/k8s_playbooks/app) |
-| **AWS ROSA 구성** | ROSA의 애플리케이션·Consumer 배포와 KEDA 설정 | [보기](../projects/phase-2/k8s_playbooks/rosa) |
+| **하이브리드 구성** | AWS ROSA의 Consumer 배포와 KEDA 자동 확장 설정 | [보기](../projects/phase-2/k8s_playbooks/rosa) |
+| **Full AWS 구성도** | ROSA, ElastiCache for Valkey, RDS, MSK 연결 구조 | [보기](images/phase-2/full-aws-architecture.png) |
 
-Full AWS 전체 구성과 환경별 시험 결과는 상단의 **프로젝트 상세**에서 확인할 수 있습니다.
+환경별 처리 흐름과 시험 결과는 상단의 **프로젝트 상세**에서 확인할 수 있습니다.
 
 ## 구현 및 검증 코드
 
