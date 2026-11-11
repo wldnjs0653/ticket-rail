@@ -16,6 +16,7 @@ const pool = require('../clients/pgClient');
 const redis = require('../clients/redisClient');
 const idempotency = require('../middleware/idempotency');
 const config = require('../config');
+const demoBookingTrace = require('../services/demoBookingTrace');
 // Prometheus 지표 — 좌석 선점 시도의 결과별 건수를 센다.
 // HTTP 상태코드(200/409)만으로는 "왜 실패했는지"가 안 보이므로,
 // 없는 좌석 / 이미 팔린 좌석 / 남이 먼저 잡은 좌석을 따로 구분해서 남긴다.
@@ -99,6 +100,7 @@ router.post('/:seatId/hold', idempotency(), async (req, res) => {
   }
 
   // 사용자가 선점에 성공 했을 경우
+  demoBookingTrace.rememberHold(holdKey, user_id, config.seatHoldTtlSeconds);
   seatHoldTotal.inc({ result: 'success' });
   return res.status(200).json({
     status: 'held',

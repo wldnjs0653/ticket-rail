@@ -6,12 +6,13 @@ const { randomUUID } = require('node:crypto');
 const base = 'http://127.0.0.1:3000';
 const runId = randomUUID();
 
-async function request(path, { body, key, statuses = [200] } = {}) {
+async function request(path, { body, key, traceToken, statuses = [200] } = {}) {
   const response = await fetch(`${base}${path}`, {
     method: body ? 'POST' : 'GET',
     headers: {
       ...(body ? { 'Content-Type': 'application/json' } : {}),
       ...(key ? { 'Idempotency-Key': `${runId}-${key}` } : {}),
+      ...(traceToken ? { 'X-TicketRail-Trace': traceToken } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(10000),
@@ -53,6 +54,10 @@ async function main() {
   assert.equal(duplicate.booking_id, booking.booking_id, 'retry must return the same booking');
   const stored = await request(`/bookings/${booking.booking_id}`);
   assert.equal(stored.seats.length, 1);
+  assert.ok(booking.demo_trace_token, 'local booking must include its trace link token');
+  assert.equal(duplicate.demo_trace_token, booking.demo_trace_token);
+  await request('/demo/booking-trace', { statuses: [404] });
+  await request('/demo/booking-trace', { traceToken: randomUUID(), statuses: [404] });
 
   // Readiness alone cannot prove that the Kafka Consumer chain has completed.
   const deadline = Date.now() + 90000;
@@ -60,12 +65,19 @@ async function main() {
     const payment = await request(`/payments/${booking.booking_id}`, { statuses: [200, 404] });
     if (payment.status === 'APPROVED' && payment.notification_sent === true) {
       assert.equal(Number(payment.amount), Number(seat.price));
-      console.log(`PASS: catalog, queue, admission, hold, booking, idempotency, Kafka payment and notification (booking ${booking.booking_id})`);
-      return;
+      const trace = await request('/demo/booking-trace', { traceToken: booking.demo_trace_token });
+      assert.equal(trace.bookingId, booking.booking_id);
+      assert.equal(trace.seat, stored.seats[0].seat_code);
+      const stageIds = ['seatHeld', 'bookingStored', 'seatReleased', 'bookingPublished', 'paymentApproved', 'paymentPublished', 'notificationSent'];
+      if (stageIds.every(stage => Number.isFinite(Date.parse(trace.stages[stage]?.at)))) {
+        assert.ok(trace.stages.seatHeld.ttlSeconds > 0);
+        console.log(`PASS: catalog, queue, admission, hold, booking, idempotency, Kafka payment and notification, booking trace (booking ${booking.booking_id})`);
+        return;
+      }
     }
     await new Promise(resolve => setTimeout(resolve, 1000));
   }
-  throw new Error('Kafka payment/notification did not complete within 90 seconds');
+  throw new Error('Kafka payment/notification or booking trace did not complete within 90 seconds');
 }
 
 main().catch(error => {

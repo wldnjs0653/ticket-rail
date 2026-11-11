@@ -30,3 +30,5 @@ docker compose -f docker-compose.local.yml up --build --wait --wait-timeout 240
 ```
 
 [예매 화면 열기](http://localhost:3000/ticketing.html) · [데모 사용·검증·종료 방법](projects/phase-2/README.md#로컬에서-예매-흐름-실행)
+
+예매 완료 화면에서 **처리 기록 보기**를 누르면 같은 예약의 Redis 좌석 선점·해제, PostgreSQL 예약 저장, Kafka 발행과 결제·알림 Consumer 처리 시각을 볼 수 있습니다.

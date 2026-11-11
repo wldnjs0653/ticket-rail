@@ -3,6 +3,7 @@ const pool = require('../clients/pgClient');
 const mockPayment = require('../mock/mockPayment');
 const config = require('../config');
 const { readEvent, createEvent } = require('../events/eventContract');
+const demoBookingTrace = require('../services/demoBookingTrace');
 const {
   createSampledLogger,
 } = require('../utils/consumerLogger');
@@ -68,6 +69,7 @@ async function handleBookingCreated(message) {
   );
 
   const payment = await createPaymentOnce(payload);
+  demoBookingTrace.record(payload.booking_id, 'paymentApproved', { at: payment.processed_at });
   await markProcessed(event.event_id);
 
   const completedEvent = createEvent(
@@ -85,6 +87,7 @@ async function handleBookingCreated(message) {
   // 결제는 이미 저장됐더라도 항상 다시 발행한다. 이전 발행 직후 장애가 났다면
   // Kafka가 booking.created를 재전달하며 이 지점에서 후속 이벤트를 복구한다.
   await publish(config.topics.paymentCompleted, completedEvent);
+  demoBookingTrace.record(payload.booking_id, 'paymentPublished');
   logSuccess(
     `[payment-consumer] booking_id=${payload.booking_id} payment_id=${payment.id} 결제 완료 이벤트 발행`
   );

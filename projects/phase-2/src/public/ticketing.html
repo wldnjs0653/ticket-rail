@@ -1041,6 +1041,8 @@
     .completion-notice small { margin-top: 3px; display: block; color: #6d7e8f; }
     .result-card > .action-bar { margin-top: 22px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .result-card > .action-bar .btn { min-height: 50px; border-radius: 6px; }
+    #bookingTraceLinkRow { margin: 14px 0 0; text-align: right; }
+    #bookingTraceLink { color: #0c5da9; text-decoration: underline; text-underline-offset: 3px; }
 
     /* ── 기준 시안 1:1 재현용 최종 레이아웃 ─────────────────── */
     .hero { min-height: 620px; overflow: hidden; }
@@ -1425,6 +1427,7 @@
           <button class="btn btn-book" id="paymentCheckBtn" onclick="checkPaymentNow()" style="display:none;">상태 다시 확인</button>
           <button class="btn btn-book" id="ticketViewBtn" onclick="viewApprovedTicket()" style="display:none;">승차권 확인</button>
         </div>
+        <p id="bookingTraceLinkRow" hidden><a id="bookingTraceLink">처리 기록 보기 →</a></p>
       </div>
       <div class="booking-history" id="bookingHistory" style="display:none;">
         <aside class="history-side">
@@ -2769,6 +2772,7 @@
 
       bookingData = {
         bookingId: res.body.booking_id,
+        traceToken: res.body.demo_trace_token,
         status: (res.body.status || 'confirmed').toUpperCase(),
         train: selectedTrain,
         seat: holdData.seat,
@@ -2804,6 +2808,11 @@
       document.getElementById('refreshBtn').style.display = 'block';
       document.getElementById('paymentCheckBtn').style.display = approved || failed ? 'none' : 'block';
       document.getElementById('ticketViewBtn').style.display = approved ? 'block' : 'none';
+      const traceLinkRow = document.getElementById('bookingTraceLinkRow');
+      traceLinkRow.hidden = LOCAL_PREVIEW || !bookingData.traceToken;
+      if (!traceLinkRow.hidden) {
+        document.getElementById('bookingTraceLink').href = `booking-trace.html#${encodeURIComponent(bookingData.traceToken)}`;
+      }
 
       const b = bookingData;
       const gradeLabel = (b.seat.grade && b.seat.grade !== 'STANDARD') ? b.seat.grade : '일반';

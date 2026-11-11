@@ -35,6 +35,7 @@ const { randomUUID } = require('crypto');
 const { publish } = require('../clients/kafkaClient');
 const config = require('../config');
 const { releaseAdmission } = require('../services/queueAdmission');
+const demoBookingTrace = require('../services/demoBookingTrace');
 const router = express.Router();
 // Prometheus 지표 — 예약 확정 결과와 Idempotency 방어 동작을 센다.
 // 특히 idempotencyTotal은 "DB UNIQUE 제약이 실제로 중복을 막았는지"를
@@ -69,8 +70,10 @@ router.post('/', idempotency(), async (req, res) => {
   }
 
   const client = await pool.connect();
+  const holdTrace = demoBookingTrace.findHold(holdKey, user_id);
   let bookingId;
   let seatPrice = 0;
+  let traceToken;
 
   try {
     await client.query('BEGIN');
@@ -126,6 +129,7 @@ router.post('/', idempotency(), async (req, res) => {
             event_id,
             seat_id,
             user_id,
+            demo_trace_token: demoBookingTrace.tokenFor(existing.rows[0].id),
             note: 'idempotency_key로 기존 예약 반환됨 (DB 레벨 중복 방지)',
           });
         }
@@ -145,6 +149,7 @@ router.post('/', idempotency(), async (req, res) => {
     );
 
     await client.query('COMMIT');
+    traceToken = demoBookingTrace.start(bookingId, seatUpdate.rows[0].seat_code, holdTrace);
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('[booking] transaction failed:', err.message);
@@ -156,7 +161,8 @@ router.post('/', idempotency(), async (req, res) => {
   }
 
   // 예약이 확정되면 Hold와 대기열 입장 점유를 즉시 반환한다.
-  await redis.del(holdKey);
+  const releasedHold = await redis.del(holdKey);
+  if (releasedHold > 0) demoBookingTrace.record(bookingId, 'seatReleased');
   try {
     await releaseAdmission(redis, { eventId: event_id, userId: user_id });
   } catch (err) {
@@ -186,7 +192,9 @@ router.post('/', idempotency(), async (req, res) => {
         amount: seatPrice,
       },
     });
+    demoBookingTrace.record(bookingId, 'bookingPublished');
   } catch (err) {
+    demoBookingTrace.record(bookingId, 'bookingPublishFailed');
     console.error(`[booking] booking_id=${bookingId} Kafka 발행 실패 (예약 자체는 확정됨):`, err.message);
   }
 
@@ -198,6 +206,7 @@ router.post('/', idempotency(), async (req, res) => {
     event_id,
     seat_id,
     user_id,
+    demo_trace_token: traceToken,
   });
 });
 

@@ -32,6 +32,7 @@ const bookingRoute = require('./routes/booking');
 const paymentRoute = require('./routes/payment');
 const eventRoute = require('./routes/event');
 const healthRoute = require('./routes/health');
+const demoBookingTrace = require('./services/demoBookingTrace');
 const { register, metricsMiddleware } = require('./metrics');
 
 // Kafka Consumer(백그라운드에서 계속 도는 결제/알림 처리 워커) 시작 함수들을 불러온다.
@@ -95,6 +96,14 @@ app.use('/bookings', bookingRoute);
 app.use('/payments', paymentRoute);
 app.use('/events', eventRoute);
 app.use('/health', healthRoute);
+if (demoBookingTrace.enabled) {
+  app.get('/demo/booking-trace', (req, res) => {
+    const trace = demoBookingTrace.read(req.get('X-TicketRail-Trace'));
+    res.set('Cache-Control', 'no-store');
+    if (!trace) return res.status(404).json({ error: 'trace_not_found' });
+    return res.json(trace);
+  });
+}
 // Express의 "에러 처리 미들웨어" — 함수 인자가 4개(err, req, res, next)인 게 특징이다.
 // 어느 라우트에서든 예상 못한 에러가 나서 여기까지 넘어오면, 사용자에게는
 // 자세한 에러 내용 대신 뭉뚱그린 500 에러만 보여준다 (보안상 내부 에러 상세를

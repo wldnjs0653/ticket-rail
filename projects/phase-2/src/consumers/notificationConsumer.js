@@ -3,6 +3,7 @@ const pool = require('../clients/pgClient');
 const mockNotification = require('../mock/mockNotification');
 const config = require('../config');
 const { readEvent, createEvent } = require('../events/eventContract');
+const demoBookingTrace = require('../services/demoBookingTrace');
 const {
   createSampledLogger,
 } = require('../utils/consumerLogger');
@@ -64,6 +65,7 @@ async function handlePaymentCompleted(message) {
   // 알림 전송이 성공한 뒤에만 완료 기록을 남긴다. 실패 시 예외가 위로 전달되어
   // Kafka가 같은 payment.completed 이벤트를 다시 처리한다.
   await markProcessed(event.event_id);
+  demoBookingTrace.record(payload.booking_id, 'notificationSent', { at: notification.sent_at });
 
   const auditEvent = createEvent(
     config.topics.notificationRequested,

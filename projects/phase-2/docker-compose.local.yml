@@ -93,6 +93,7 @@ services:
       KAFKA_CONSUMER_GROUP: ticketrail-phase2-local
       SKIP_KAFKA_CONSUMERS: "false"
       MOCK_PAYMENT_FAILURE_RATE: 0
+      ENABLE_LOCAL_BOOKING_TRACE: "true"
     volumes:
       - type: bind
         source: ./local/smoke.js
