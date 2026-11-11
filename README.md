@@ -20,6 +20,10 @@
 1. [미리보기 ZIP](https://github.com/wldnjs0653/ticket-rail/releases/download/html-preview-v1/TicketRail-preview.zip)을 다운로드한 뒤 압축을 풉니다.
 2. 압축을 푼 폴더에서 **`preview.html`**을 더블클릭합니다.
 
+*(예매 체험 화면 예시)*
+
+![TicketRail 미리보기의 열차 조회 화면](docs/images/booking-preview-example.png)
+
 ### 2. 서비스 연동 확인
 
 API와 Redis·PostgreSQL·Kafka를 함께 실행합니다. Docker Compose v2.20 이상과 Linux 컨테이너 환경이 필요합니다.
