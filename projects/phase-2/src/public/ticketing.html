@@ -2110,7 +2110,7 @@
         return { ok: true, status: 200, body: { hold_ttl_seconds: 180 } };
       }
       if (method === 'POST' && path === '/bookings') {
-        return { ok: true, status: 201, body: { booking_id: 'TR20261007123456', status: 'confirmed' } };
+        return { ok: true, status: 201, body: { booking_id: 1, status: 'confirmed' } };
       }
       if (method === 'POST' && path === '/queue/leave') {
         return { ok: true, status: 200, body: { status: 'released' } };

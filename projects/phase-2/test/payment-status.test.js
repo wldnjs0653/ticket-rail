@@ -55,6 +55,18 @@ test('빠른 승인은 지연 화면/알림 완료 대기 없이 바로 완료�
   assert.equal(f.events.length, 1);
 });
 
+test('HTML 미리보기의 예약 ID로 결제 승인 조회를 완료할 수 있다', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/public/ticketing.html'), 'utf8');
+  const previewSource = source.match(/async function previewApi\(method, path\) \{[\s\S]*?\n    \}/)?.[0];
+  assert.ok(previewSource);
+  const previewApi = vm.runInNewContext(`(${previewSource})`, { setTimeout: callback => callback() });
+  const booking = await previewApi('POST', '/bookings');
+  const f = fixture(async id => ({ booking_id: id, status: 'APPROVED' }));
+  f.tracker.start(booking.body.booking_id);
+  await flush();
+  assert.deepEqual(f.events, [['approved', booking.body.booking_id]]);
+});
+
 test('8초 지연 화면 후 40회 이상의 대기에서도 자동 조회를 계속하고 승인 시 전환한다', async () => {
   let approved = false;
   let reads = 0;

@@ -618,7 +618,7 @@
       "destination": "src/public/ticketing.html",
       "git_mode": "0o664",
       "source_sha256": "715e25010c7ccf35642c021580b000be05867ddfb973235e8d29231275defdfc",
-      "portfolio_sha256": "51279bef9cd0fc6bd70ab64a3ab9a09648060338d641c622891f8a760bc7244f"
+      "portfolio_sha256": "6c209afc65ed0a354c79ede63bba178ef36dc24283b7cb62a1e5248e885e5b22"
     },
     {
       "source": "src/routes/auth.js",
@@ -737,7 +737,7 @@
       "destination": "test/payment-status.test.js",
       "git_mode": "0o664",
       "source_sha256": "ec11f555f3ac8712577048a02f61365f55b53bdf100a30e5e535798f0f5facb4",
-      "portfolio_sha256": "8e659e7657e68e75a473728e521c003f2b97443a6fde939a41210da0c7052c0f"
+      "portfolio_sha256": "fd4d0e9f5c5ed5838123f651122bdb12cc9b8ce21d5fc30066eec31af5ed5000"
     },
     {
       "source": "test/queue-admission.test.js",
@@ -975,7 +975,8 @@
     "Original README.md retained as UPSTREAM_README.md; original CLAUDE.md retained as UPSTREAM_NOTES.md for historical reference.",
     "Original GitHub workflows retained as ci-reference/*.yml.txt, outside the executable workflow directory.",
     "README.md and SOURCE.json added for portfolio navigation and provenance; unit tests run with dependencies installed locally.",
-    "Original docker-compose.local.yml retained as local/docker-compose.upstream.yml.txt; active Compose replaced by a portfolio-only local demo. Added src/db/schema.sql adapted for PostgreSQL 16 from the retained schema dump, local seed/smoke files, and local-demo CI. Original application code unchanged."
+    "Original docker-compose.local.yml retained as local/docker-compose.upstream.yml.txt; active Compose replaced by a portfolio-only local demo. Added src/db/schema.sql adapted for PostgreSQL 16 from the retained schema dump, local seed/smoke files, and local-demo CI.",
+    "Adjusted the browser-only reservation ID in src/public/ticketing.html and added a regression test in test/payment-status.test.js."
   ],
   "checksum_note": "source_sha256 hashes the original source bytes; portfolio_sha256 hashes the Git index bytes after repository line-ending normalization.",
   "portfolio_additions": [
