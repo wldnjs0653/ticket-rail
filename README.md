@@ -24,7 +24,7 @@
 
 ![예약 번호별 Redis 좌석 선점·해제, PostgreSQL 예약 저장, Kafka 이벤트 발행 및 결제·알림 처리 시각](docs/images/booking-trace-example.png)
 
-*Windows에서는 Docker Desktop을 사용합니다.*
+*Windows에서 실행하려면 Docker Desktop이 필요합니다.*
 
 1. **Docker Desktop**을 열고 Docker 엔진이 시작될 때까지 기다립니다.
 2. **PowerShell**을 열고 아래 명령을 실행합니다. 첫 줄은 저장소를 Windows 사용자 폴더에 처음 복제할 때만 실행합니다.
