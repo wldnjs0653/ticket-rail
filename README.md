@@ -43,3 +43,5 @@
    ```powershell
    docker compose -f "$HOME\ticket-rail\projects\phase-2\docker-compose.local.yml" down
    ```
+
+   다른 Docker 작업이 없다면, Windows 작업 표시줄의 Docker 아이콘을 우클릭하고 **Quit Docker Desktop**을 선택합니다.
